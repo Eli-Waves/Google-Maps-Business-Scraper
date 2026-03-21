@@ -1,15 +1,26 @@
 """
 Google Maps Business Scraper
-Usage: python scraper.py --query "restaurants in Accra" --limit 20
 """
-
 import asyncio
 import argparse
+import subprocess
+import sys
 from playwright.async_api import async_playwright
 from database import init_db, upsert_lead
 
 
-async def scrape_google_maps(query: str, limit: int = 20) -> list[dict]:
+def ensure_chromium():
+    """Install Chromium if not present."""
+    import os
+    browser_path = os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell")
+    if not os.path.exists(browser_path):
+        print("[+] Installing Chromium...")
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        print("[✓] Chromium installed")
+
+
+async def scrape_google_maps(query: str, limit: int = 100) -> list[dict]:
+    ensure_chromium()
     results = []
 
     async with async_playwright() as p:
@@ -21,10 +32,9 @@ async def scrape_google_maps(query: str, limit: int = 20) -> list[dict]:
         await page.goto(url, timeout=60000)
         await page.wait_for_timeout(3000)
 
-        # Scroll the results panel to load more listings
         panel = page.locator('div[role="feed"]')
         prev_count = 0
-        for _ in range(15):
+        for _ in range(20):
             await panel.evaluate("el => el.scrollBy(0, 2000)")
             await page.wait_for_timeout(1500)
             links = await page.locator('a[href*="/maps/place/"]').all()
@@ -84,7 +94,7 @@ async def scrape_google_maps(query: str, limit: int = 20) -> list[dict]:
     return results
 
 
-def run(query: str, limit: int):
+def run(query: str, limit: int = 100):
     init_db()
     leads = asyncio.run(scrape_google_maps(query, limit))
     saved = 0
@@ -98,6 +108,6 @@ def run(query: str, limit: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--query", default="restaurants in Accra Ghana")
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args()
     run(args.query, args.limit)
