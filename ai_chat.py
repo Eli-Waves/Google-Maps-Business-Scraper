@@ -1,12 +1,14 @@
 """
-OpenAI-powered conversation handler
-Chats with leads naturally, identifies interest, and hands off to you.
+Grok-powered conversation handler
 """
 import os
 from openai import OpenAI
 from database import get_conversation
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.getenv("GROK_API_KEY"),
+    base_url="https://api.x.ai/v1",
+)
 
 SYSTEM_PROMPT = """You are a friendly sales assistant for a web design agency in Ghana called {agency_name}.
 
@@ -30,23 +32,17 @@ AGENCY_NAME = os.getenv("AGENCY_NAME", "WebGh Agency")
 
 
 def get_ai_reply(phone: str, new_message: str) -> tuple[str, bool, bool]:
-    """
-    Get AI reply for a lead's message.
-    Returns: (reply_text, is_hot_lead, is_not_interested)
-    """
     history = get_conversation(phone)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT.format(agency_name=AGENCY_NAME)}]
 
-    # Add conversation history (last 10 messages to save tokens)
     for msg in history[-10:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
-    # Add the new incoming message
     messages.append({"role": "user", "content": new_message})
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="grok-3-mini",
         messages=messages,
         max_tokens=300,
         temperature=0.7,
@@ -57,7 +53,6 @@ def get_ai_reply(phone: str, new_message: str) -> tuple[str, bool, bool]:
     is_hot_lead = "[HOT_LEAD]" in reply
     is_not_interested = "[NOT_INTERESTED]" in reply
 
-    # Clean the signal tags from the actual reply
     clean_reply = reply.replace("[HOT_LEAD]", "").replace("[NOT_INTERESTED]", "").strip()
 
     return clean_reply, is_hot_lead, is_not_interested
