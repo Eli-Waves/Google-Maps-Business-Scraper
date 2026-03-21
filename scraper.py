@@ -5,13 +5,12 @@ import asyncio
 import argparse
 import subprocess
 import sys
+import os
 from playwright.async_api import async_playwright
 from database import init_db, upsert_lead
 
 
 def ensure_chromium():
-    """Install Chromium if not present."""
-    import os
     browser_path = os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell")
     if not os.path.exists(browser_path):
         print("[+] Installing Chromium...")
@@ -19,24 +18,32 @@ def ensure_chromium():
         print("[✓] Chromium installed")
 
 
-async def scrape_google_maps(query: str, limit: int = 100) -> list[dict]:
+async def scrape_google_maps(query: str, limit: int = 50) -> list[dict]:
     ensure_chromium()
     results = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
 
         url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
         print(f"[+] Searching: {url}")
-        await page.goto(url, timeout=60000)
-        await page.wait_for_timeout(3000)
+
+        # Use domcontentloaded instead of full load — much faster
+        await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(4000)
 
         panel = page.locator('div[role="feed"]')
         prev_count = 0
-        for _ in range(20):
-            await panel.evaluate("el => el.scrollBy(0, 2000)")
-            await page.wait_for_timeout(1500)
+        for _ in range(15):
+            try:
+                await panel.evaluate("el => el.scrollBy(0, 2000)")
+                await page.wait_for_timeout(1500)
+            except:
+                break
             links = await page.locator('a[href*="/maps/place/"]').all()
             if len(links) >= limit or len(links) == prev_count:
                 break
@@ -49,7 +56,7 @@ async def scrape_google_maps(query: str, limit: int = 100) -> list[dict]:
 
         for i, href in enumerate(hrefs):
             try:
-                await page.goto(href, timeout=30000)
+                await page.goto(href, timeout=30000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
 
                 name = (await page.title()).replace(" - Google Maps", "").strip()
@@ -94,7 +101,7 @@ async def scrape_google_maps(query: str, limit: int = 100) -> list[dict]:
     return results
 
 
-def run(query: str, limit: int = 100):
+def run(query: str, limit: int = 50):
     init_db()
     leads = asyncio.run(scrape_google_maps(query, limit))
     saved = 0
@@ -108,6 +115,6 @@ def run(query: str, limit: int = 100):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--query", default="restaurants in Accra Ghana")
-    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--limit", type=int, default=50)
     args = parser.parse_args()
     run(args.query, args.limit)
