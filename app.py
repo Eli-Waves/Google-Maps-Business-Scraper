@@ -5,7 +5,6 @@ This is what Render runs 24/7.
 import os
 import time
 import threading
-import asyncio
 import httpx as _httpx
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -13,8 +12,8 @@ from database import init_db, get_lead_by_phone, update_lead_status, append_mess
 from whatsapp import send_message, parse_incoming
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead, send_telegram
-from scraper import scrape_google_maps, ensure_chromium
-from scheduler import get_next_query, run_outreach
+from scraper import scrape_businesses, get_next_query, run as run_scraper
+from scheduler import run_outreach
 
 app = FastAPI(title="Web Agency Bot")
 
@@ -37,7 +36,6 @@ def self_ping():
 @app.on_event("startup")
 def startup():
     init_db()
-    ensure_chromium()  # Install Chromium at startup so it's ready
     threading.Thread(target=self_ping, daemon=True).start()
     print("[✓] App started")
 
@@ -104,7 +102,7 @@ async def receive_message(request: Request):
 
 
 @app.get("/run-scrape")
-async def trigger_scrape(key: str = Query(None)):
+def trigger_scrape(key: str = Query(None)):
     if key != SECRET_KEY:
         raise HTTPException(status_code=403, detail="Invalid key")
 
@@ -112,7 +110,7 @@ async def trigger_scrape(key: str = Query(None)):
     print(f"[+] Scraping: {query}")
 
     try:
-        leads = await scrape_google_maps(query, limit=50)
+        leads = scrape_businesses(query, limit=50)
         saved = 0
         details = []
 
@@ -129,7 +127,7 @@ async def trigger_scrape(key: str = Query(None)):
                 msg = f"✅ <b>Scrape Done!</b>\n<b>Query:</b> {query}\n<b>Saved:</b> {saved}\n\n" + "\n".join(chunk)
                 send_telegram(msg)
 
-        return {"status": "done", "query": query, "saved": saved}
+        return {"status": "done", "query": query, "saved": saved, "leads": details}
 
     except Exception as e:
         send_telegram(f"❌ Scrape failed: {e}")
