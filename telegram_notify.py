@@ -17,15 +17,22 @@ def send_telegram(message: str):
 
 
 def notify_hot_lead(lead: dict):
+    phone = lead.get('phone') or 'N/A'
+    name = lead.get('name') or 'Unknown'
+    category = lead.get('category') or 'N/A'
+    address = lead.get('address') or 'N/A'
+    website = lead.get('website') or 'No website'
+    convo = lead.get('conversation_summary') or 'No conversation recorded'
+
     msg = (
         f"🔥 <b>HOT LEAD!</b>\n\n"
-        f"👤 <b>Name:</b> {lead.get('name', 'Unknown')}\n"
-        f"📞 <b>Phone:</b> {lead.get('phone')}\n"
-        f"🏷 <b>Category:</b> {lead.get('category', 'N/A')}\n"
-        f"📍 <b>Address:</b> {lead.get('address', 'N/A')}\n"
-        f"🌐 <b>Website:</b> {lead.get('website') or 'None (opportunity!)'}\n\n"
-        f"💬 They're interested! Follow up now and close the deal.\n"
-        f"💰 Pitch: GHS 500 setup + GHS 700/month"
+        f"📞 <b>Phone:</b> {phone}\n"
+        f"👤 <b>Name:</b> {name}\n"
+        f"🏷 <b>Category:</b> {category}\n"
+        f"📍 <b>Address:</b> {address}\n"
+        f"🌐 <b>Website:</b> {website}\n\n"
+        f"💬 <b>Conversation:</b>\n<pre>{convo}</pre>\n\n"
+        f"💰 Close at GHS 500 setup + GHS 700/month"
     )
     send_telegram(msg)
 
