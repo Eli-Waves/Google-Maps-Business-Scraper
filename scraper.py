@@ -1,11 +1,14 @@
 """
-Google Business Scraper using Serper API
+Google Maps Scraper using Apify
+Returns full business details including phone numbers
 """
 import os
+import time
 import requests
 from database import init_db, upsert_lead
 
-SERPER_KEY = os.getenv("SERPER_API_KEY")
+APIFY_TOKEN = os.getenv("APIFY_API_KEY")
+ACTOR_ID = "compass~crawler-google-places"
 
 GHANA_CITIES = [
     "Accra", "Kumasi", "Tamale", "Takoradi", "Cape Coast",
@@ -30,72 +33,53 @@ def get_next_query():
     return f"{category} in {city} Ghana"
 
 
-def get_phone_for_business(name: str, address: str = "") -> str | None:
-    """Search specifically for a business's phone number."""
-    headers = {
-        "X-API-KEY": SERPER_KEY,
-        "Content-Type": "application/json",
-    }
-    query = f"{name} {address} phone number Ghana"
-    payload = {"q": query, "num": 3, "gl": "gh"}
-
-    try:
-        response = requests.post(
-            "https://google.serper.dev/search",
-            headers=headers,
-            json=payload,
-            timeout=10
-        )
-        data = response.json()
-
-        # Check knowledge graph first
-        kg = data.get("knowledgeGraph", {})
-        if kg.get("phoneNumber"):
-            return kg["phoneNumber"]
-
-        # Check answer box
-        answer = data.get("answerBox", {})
-        if answer.get("phoneNumber"):
-            return answer["phoneNumber"]
-
-        return None
-    except:
-        return None
-
-
 def scrape_businesses(query: str, limit: int = 20) -> list[dict]:
-    print(f"[+] Searching: {query}")
-    leads = []
+    print(f"[+] Apify scraping: {query}")
 
-    headers = {
-        "X-API-KEY": SERPER_KEY,
-        "Content-Type": "application/json",
+    # Start the actor run
+    run_url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs"
+    payload = {
+        "searchStringsArray": [query],
+        "maxCrawledPlacesPerSearch": limit,
+        "language": "en",
+        "countryCode": "gh",
+        "includeContacts": True,
     }
 
-    payload = {"q": query, "num": limit, "gl": "gh", "hl": "en"}
-
-    response = requests.post(
-        "https://google.serper.dev/places",
-        headers=headers,
-        json=payload,
-        timeout=15
-    )
+    headers = {"Authorization": f"Bearer {APIFY_TOKEN}"}
+    response = requests.post(run_url, json=payload, headers=headers, timeout=30)
     response.raise_for_status()
-    data = response.json()
+    run_data = response.json()
+    run_id = run_data["data"]["id"]
+    dataset_id = run_data["data"]["defaultDatasetId"]
 
-    places = data.get("places", [])
-    print(f"[+] Found {len(places)} businesses, fetching phone numbers...")
+    print(f"[+] Run started: {run_id}. Waiting for results...")
 
-    for place in places:
-        name = place.get("title") or place.get("name")
-        phone = place.get("phoneNumber")
-        address = place.get("address", "")
-        website = place.get("website")
-        category = place.get("type") or place.get("category")
+    # Wait for run to complete
+    status_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
+    for _ in range(60):  # Wait up to 5 minutes
+        time.sleep(5)
+        status_res = requests.get(status_url, headers=headers).json()
+        status = status_res["data"]["status"]
+        print(f"  Status: {status}")
+        if status in ("SUCCEEDED", "FAILED", "ABORTED"):
+            break
 
-        # If no phone, try to find it
-        if not phone and name:
-            phone = get_phone_for_business(name, address)
+    if status != "SUCCEEDED":
+        print(f"[!] Apify run failed with status: {status}")
+        return []
+
+    # Fetch results
+    dataset_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items"
+    items_res = requests.get(dataset_url, headers=headers, params={"limit": limit}).json()
+
+    leads = []
+    for item in items_res:
+        name = item.get("title") or item.get("name")
+        phone = item.get("phone") or item.get("phoneUnformatted")
+        address = item.get("address") or item.get("street")
+        website = item.get("website") or item.get("url")
+        category = item.get("categoryName") or item.get("category")
 
         lead = {
             "name": name,
@@ -103,12 +87,12 @@ def scrape_businesses(query: str, limit: int = 20) -> list[dict]:
             "website": website,
             "category": category,
             "address": address,
-            "maps_url": place.get("cid", ""),
+            "maps_url": item.get("url", ""),
         }
-
         leads.append(lead)
         print(f"  • {name} | {phone} | {category}")
 
+    print(f"[+] Found {len(leads)} businesses")
     return leads
 
 
