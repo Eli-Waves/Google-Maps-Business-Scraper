@@ -8,7 +8,7 @@ import threading
 import httpx as _httpx
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
-from database import init_db, get_lead_by_phone, update_lead_status, append_message, upsert_lead
+from database import init_db, get_lead_by_phone, update_lead_status, append_message, upsert_lead, get_conversation
 from whatsapp import send_message, parse_incoming
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead
@@ -76,7 +76,7 @@ async def receive_message(request: Request):
         })
         lead = get_lead_by_phone(phone)
 
-    # Only stop for converted leads, never for not_interested
+    # Only stop for converted leads
     if lead["status"] in ("converted",):
         return {"status": "skipped"}
 
@@ -85,9 +85,17 @@ async def receive_message(request: Request):
     send_message(phone, reply)
     append_message(phone, "assistant", reply)
 
-    if is_hot:
+    if is_hot and lead["status"] != "interested":
+        # Build summary from conversation history
+        history = get_conversation(phone)
+        convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history[-10:]])
+
+        # Enrich lead with conversation context for Telegram
+        enriched_lead = dict(lead)
+        enriched_lead["conversation_summary"] = convo_text
+
         update_lead_status(phone, "interested")
-        notify_hot_lead(lead)
+        notify_hot_lead(enriched_lead)
         print(f"  🔥 HOT LEAD: {lead['name']} ({phone})")
     else:
         update_lead_status(phone, "contacted")
