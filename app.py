@@ -12,10 +12,12 @@ from database import init_db, get_lead_by_phone, update_lead_status, append_mess
 from whatsapp import send_message, parse_incoming
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead
+from scheduler import start_scheduler, run_scrape, run_outreach
 
 app = FastAPI(title="Web Agency Bot")
 
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "my_verify_token_123")
+SECRET_KEY = os.getenv("SECRET_KEY", "webgh_secret")
 SELF_URL = "https://google-maps-business-scraper.onrender.com/ping"
 
 
@@ -34,6 +36,7 @@ def self_ping():
 def startup():
     init_db()
     threading.Thread(target=self_ping, daemon=True).start()
+    start_scheduler()
     print("[✓] App started")
 
 
@@ -76,7 +79,6 @@ async def receive_message(request: Request):
         })
         lead = get_lead_by_phone(phone)
 
-    # Only stop for converted leads
     if lead["status"] in ("converted",):
         return {"status": "skipped"}
 
@@ -86,14 +88,10 @@ async def receive_message(request: Request):
     append_message(phone, "assistant", reply)
 
     if is_hot and lead["status"] != "interested":
-        # Build summary from conversation history
         history = get_conversation(phone)
         convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history[-10:]])
-
-        # Enrich lead with conversation context for Telegram
         enriched_lead = dict(lead)
         enriched_lead["conversation_summary"] = convo_text
-
         update_lead_status(phone, "interested")
         notify_hot_lead(enriched_lead)
         print(f"  🔥 HOT LEAD: {lead['name']} ({phone})")
@@ -103,9 +101,26 @@ async def receive_message(request: Request):
     return {"status": "ok"}
 
 
+# ── Manual triggers (protected by secret key) ─────────────────────────────────
+@app.get("/run-scrape")
+def trigger_scrape(key: str = Query(None)):
+    if key != SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid key")
+    threading.Thread(target=run_scrape, daemon=True).start()
+    return {"status": "Scrape started in background"}
+
+
+@app.get("/run-outreach")
+def trigger_outreach(key: str = Query(None)):
+    if key != SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid key")
+    threading.Thread(target=run_outreach, daemon=True).start()
+    return {"status": "Outreach started in background"}
+
+
 @app.get("/")
 def health():
-    return {"status": "running", "service": "Web Agency Bot 🚀"}
+    return {"status": "running", "service": "Web Agency Bot"}
 
 
 @app.get("/ping")
