@@ -3,6 +3,9 @@ FastAPI server — WhatsApp webhook + dashboard
 This is what Render runs 24/7.
 """
 import os
+import time
+import threading
+import httpx as _httpx
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
 from database import init_db, get_lead_by_phone, update_lead_status, append_message, upsert_lead
@@ -13,15 +16,27 @@ from telegram_notify import notify_hot_lead
 app = FastAPI(title="Web Agency Bot")
 
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "my_verify_token_123")
+SELF_URL = "https://google-maps-business-scraper.onrender.com/ping"
+
+
+def self_ping():
+    time.sleep(60)
+    while True:
+        try:
+            _httpx.get(SELF_URL, timeout=10)
+            print("[♻] Self-ping OK")
+        except Exception as e:
+            print(f"[!] Self-ping failed: {e}")
+        time.sleep(240)
 
 
 @app.on_event("startup")
 def startup():
     init_db()
+    threading.Thread(target=self_ping, daemon=True).start()
     print("[✓] App started")
 
 
-# ── Webhook verification (Meta requires this) ─────────────────────────────────
 @app.get("/webhook")
 def verify_webhook(
     hub_mode: str = Query(None, alias="hub.mode"),
@@ -34,7 +49,6 @@ def verify_webhook(
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
-# ── Incoming WhatsApp messages ─────────────────────────────────────────────────
 @app.post("/webhook")
 async def receive_message(request: Request):
     data = await request.json()
@@ -48,10 +62,8 @@ async def receive_message(request: Request):
 
     print(f"[↓] Message from {phone}: {user_message}")
 
-    # Save user message
     append_message(phone, "user", user_message)
 
-    # Get lead info — if unknown, create a temporary record so we can still reply
     lead = get_lead_by_phone(phone)
     if not lead:
         upsert_lead({
@@ -67,14 +79,11 @@ async def receive_message(request: Request):
     if lead["status"] in ("converted", "not_interested"):
         return {"status": "skipped"}
 
-    # Get AI reply
     reply, is_hot, is_cold = get_ai_reply(phone, user_message)
 
-    # Send reply back
     send_message(phone, reply)
     append_message(phone, "assistant", reply)
 
-    # Update status
     if is_hot:
         update_lead_status(phone, "interested")
         notify_hot_lead(lead)
@@ -88,7 +97,11 @@ async def receive_message(request: Request):
     return {"status": "ok"}
 
 
-# ── Health check ───────────────────────────────────────────────────────────────
 @app.get("/")
 def health():
     return {"status": "running", "service": "Web Agency Bot 🚀"}
+
+
+@app.get("/ping")
+def ping():
+    return "pong"
