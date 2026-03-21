@@ -5,7 +5,7 @@ This is what Render runs 24/7.
 import os
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
-from database import init_db, get_lead_by_phone, update_lead_status, append_message
+from database import init_db, get_lead_by_phone, update_lead_status, append_message, upsert_lead
 from whatsapp import send_message, parse_incoming
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead
@@ -51,11 +51,18 @@ async def receive_message(request: Request):
     # Save user message
     append_message(phone, "user", user_message)
 
-    # Get lead info
+    # Get lead info — if unknown, create a temporary record so we can still reply
     lead = get_lead_by_phone(phone)
     if not lead:
-        # Unknown number — ignore or create a basic record
-        return {"status": "unknown_lead"}
+        upsert_lead({
+            "name": "Unknown",
+            "phone": phone,
+            "website": None,
+            "category": None,
+            "address": None,
+            "maps_url": None,
+        })
+        lead = get_lead_by_phone(phone)
 
     if lead["status"] in ("converted", "not_interested"):
         return {"status": "skipped"}
