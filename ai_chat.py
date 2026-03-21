@@ -16,9 +16,9 @@ Rules:
 - Only mention pricing (GHS 500 setup + GHS 700/month) if they ask.
 - If they seem interested, tell them someone will follow up soon.
 - Never send long paragraphs. One or two short sentences max.
+- If they said no before but come back, engage them warmly again — people change their minds.
 
 When they clearly want a website or ask about price or say yes — end your reply with: [HOT_LEAD]
-When they say no or not interested — end with: [NOT_INTERESTED]
 """
 
 AGENCY_NAME = os.getenv("AGENCY_NAME", "WebGh Agency")
@@ -29,7 +29,7 @@ def get_ai_reply(phone: str, new_message: str) -> tuple[str, bool, bool]:
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT.format(agency_name=AGENCY_NAME)}]
 
-    for msg in history[-10:]:
+    for msg in history[-20:]:  # Remember last 20 messages
         messages.append({"role": msg["role"], "content": msg["content"]})
 
     messages.append({"role": "user", "content": new_message})
@@ -44,8 +44,6 @@ def get_ai_reply(phone: str, new_message: str) -> tuple[str, bool, bool]:
     reply = response.choices[0].message.content.strip()
 
     is_hot_lead = "[HOT_LEAD]" in reply
-    is_not_interested = "[NOT_INTERESTED]" in reply
+    clean_reply = reply.replace("[HOT_LEAD]", "").strip()
 
-    clean_reply = reply.replace("[HOT_LEAD]", "").replace("[NOT_INTERESTED]", "").strip()
-
-    return clean_reply, is_hot_lead, is_not_interested
+    return clean_reply, is_hot_lead, False  # Never mark as not_interested
