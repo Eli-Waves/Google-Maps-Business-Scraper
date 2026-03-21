@@ -1,120 +1,96 @@
 """
-Google Maps Business Scraper
+Google Business Scraper using Serper API
+Fast, reliable, no browser needed
 """
-import asyncio
-import argparse
-import subprocess
-import sys
 import os
-from playwright.async_api import async_playwright
+import requests
 from database import init_db, upsert_lead
 
+SERPER_KEY = os.getenv("SERPER_API_KEY")
 
-def ensure_chromium():
-    browser_path = os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell")
-    if not os.path.exists(browser_path):
-        print("[+] Installing Chromium...")
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        print("[✓] Chromium installed")
+GHANA_CITIES = [
+    "Accra", "Kumasi", "Tamale", "Takoradi", "Cape Coast",
+    "Sunyani", "Koforidua", "Ho", "Bolgatanga", "Wa"
+]
 
+CATEGORIES = [
+    "restaurants", "hotels", "salons", "pharmacies", "supermarkets",
+    "schools", "clinics", "car rentals", "event centers", "guest houses",
+    "boutiques", "hardware stores", "printing shops", "logistics companies"
+]
 
-async def scrape_google_maps(query: str, limit: int = 50) -> list[dict]:
-    ensure_chromium()
-    results = []
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-
-        url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
-        print(f"[+] Searching: {url}")
-
-        # Use domcontentloaded instead of full load — much faster
-        await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-        await page.wait_for_timeout(4000)
-
-        panel = page.locator('div[role="feed"]')
-        prev_count = 0
-        for _ in range(15):
-            try:
-                await panel.evaluate("el => el.scrollBy(0, 2000)")
-                await page.wait_for_timeout(1500)
-            except:
-                break
-            links = await page.locator('a[href*="/maps/place/"]').all()
-            if len(links) >= limit or len(links) == prev_count:
-                break
-            prev_count = len(links)
-
-        links = await page.locator('a[href*="/maps/place/"]').all()
-        hrefs = list({await l.get_attribute("href") for l in links if await l.get_attribute("href")})[:limit]
-
-        print(f"[+] Found {len(hrefs)} listings. Extracting details...")
-
-        for i, href in enumerate(hrefs):
-            try:
-                await page.goto(href, timeout=30000, wait_until="domcontentloaded")
-                await page.wait_for_timeout(2000)
-
-                name = (await page.title()).replace(" - Google Maps", "").strip()
-
-                phone = None
-                phone_el = page.locator('button[data-item-id*="phone"] div.fontBodyMedium')
-                if await phone_el.count() > 0:
-                    phone = (await phone_el.first.text_content()).strip()
-
-                website = None
-                web_el = page.locator('a[data-item-id="authority"]')
-                if await web_el.count() > 0:
-                    website = await web_el.first.get_attribute("href")
-
-                category = None
-                cat_el = page.locator('button[jsaction*="category"]')
-                if await cat_el.count() > 0:
-                    category = (await cat_el.first.text_content()).strip()
-
-                address = None
-                addr_el = page.locator('button[data-item-id="address"] div.fontBodyMedium')
-                if await addr_el.count() > 0:
-                    address = (await addr_el.first.text_content()).strip()
-
-                lead = {
-                    "name": name,
-                    "phone": phone,
-                    "website": website,
-                    "category": category,
-                    "address": address,
-                    "maps_url": href,
-                }
-
-                results.append(lead)
-                print(f"  [{i+1}] {name} | {phone} | {category}")
-
-            except Exception as e:
-                print(f"  [!] Error on listing {i+1}: {e}")
-
-        await browser.close()
-
-    return results
+city_index = [0]
+category_index = [0]
 
 
-def run(query: str, limit: int = 50):
+def get_next_query():
+    city = GHANA_CITIES[city_index[0] % len(GHANA_CITIES)]
+    category = CATEGORIES[category_index[0] % len(CATEGORIES)]
+    city_index[0] += 1
+    category_index[0] += 1
+    return f"{category} in {city} Ghana"
+
+
+def scrape_businesses(query: str, limit: int = 50) -> list[dict]:
+    print(f"[+] Searching: {query}")
+    leads = []
+
+    headers = {
+        "X-API-KEY": SERPER_KEY,
+        "Content-Type": "application/json",
+    }
+
+    # Search local businesses via Serper places
+    payload = {"q": query, "num": limit, "gl": "gh", "hl": "en"}
+
+    response = requests.post(
+        "https://google.serper.dev/places",
+        headers=headers,
+        json=payload,
+        timeout=15
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    places = data.get("places", [])
+    print(f"[+] Found {len(places)} businesses")
+
+    for place in places:
+        name = place.get("title") or place.get("name")
+        phone = place.get("phoneNumber")
+        address = place.get("address")
+        website = place.get("website")
+        category = place.get("type") or place.get("category")
+        rating = place.get("rating")
+
+        lead = {
+            "name": name,
+            "phone": phone,
+            "website": website,
+            "category": category,
+            "address": address,
+            "maps_url": place.get("cid", ""),
+        }
+
+        leads.append(lead)
+        print(f"  • {name} | {phone} | {category}")
+
+    return leads
+
+
+def run(query: str = None, limit: int = 50):
     init_db()
-    leads = asyncio.run(scrape_google_maps(query, limit))
+    if not query:
+        query = get_next_query()
+    leads = scrape_businesses(query, limit)
     saved = 0
     for lead in leads:
         if lead.get("phone"):
             upsert_lead(lead)
             saved += 1
-    print(f"\n[✓] Saved {saved} new leads to database")
+    print(f"\n[✓] Saved {saved} leads to database")
+    return leads
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--query", default="restaurants in Accra Ghana")
-    parser.add_argument("--limit", type=int, default=50)
-    args = parser.parse_args()
-    run(args.query, args.limit)
+    run()
