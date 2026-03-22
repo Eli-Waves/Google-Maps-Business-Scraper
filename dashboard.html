@@ -70,8 +70,9 @@
   .list { overflow-y: auto; flex: 1; }
   .item {
     display: flex; align-items: center; gap: 12px;
-    padding: 11px 16px; cursor: pointer;
-    border-bottom: 1px solid rgba(42,57,66,.4);
+    padding: 11px 16px; cursor: pointer; width: 100%; text-align: left;
+    background: none; border: none; border-bottom: 1px solid rgba(42,57,66,.4);
+    color: var(--text); font-family: inherit;
     transition: background .15s;
   }
   .item:active, .item.active { background: var(--hover); }
@@ -217,14 +218,14 @@ function render(){
     return l.status===filter;
   });
   document.getElementById('list').innerHTML = fl.map(l=>`
-    <div class="item${active?.phone===l.phone?' active':''}" data-phone="${l.phone}" onclick="event.preventDefault();event.stopPropagation();openChat(this.dataset.phone)">
+    <button class="item${active?.phone===l.phone?' active':''}" data-phone="${l.phone}" onclick="openChat(this.dataset.phone)">
       <div class="av ${avCls(l)}">${ini(l.name)}</div>
       <div class="info">
         <div class="name">${l.name||'Unknown'}</div>
         <div class="preview">${l.last_message||l.phone||''}</div>
       </div>
       <span class="bdg ${l.unknown?'unknown':l.status}">${l.unknown?'unknown':l.status}</span>
-    </div>`).join('')||'<div style="padding:20px;color:var(--muted);font-size:.8rem;text-align:center">No leads</div>';
+    </button>`).join('')||'<div style="padding:20px;color:var(--muted);font-size:.8rem;text-align:center">No leads</div>';
 }
 
 function openChat(phone){
@@ -237,7 +238,7 @@ function openChat(phone){
   document.getElementById('csub').textContent=`${active.phone} · ${active.category||'N/A'} · ${active.status}`;
   const convo=active.conversation||[];
   document.getElementById('msgs').innerHTML=convo.length?
-    convo.map(m=>`<div class="bubble ${m.role==='assistant'?'out':'in'}">${m.content}<div class="t">${m.time?new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</div></div>`).join(''):
+    convo.map(m=>`<div class="bubble ${m.role==='assistant'?'out':'in'}">${m.content}<div class="t">${m.time?new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true}):''}</div></button>`).join(''):
     '<div class="empty-state"><p>No messages yet</p></div>';
   const msgs=document.getElementById('msgs');
   msgs.scrollTop=msgs.scrollHeight;
@@ -261,7 +262,7 @@ async function fetch_data(){
     document.getElementById('sc').textContent=d.contacted;
     document.getElementById('si').textContent=d.interested;
     document.getElementById('sv').textContent=d.converted;
-    document.getElementById('upd').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('upd').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true});
     leads=d.leads;
     render();
     if(active){ const u=leads.find(l=>l.phone===active.phone); if(u){active=u; open(active.phone);} }
