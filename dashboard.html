@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web GH — Live Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #111b21;
+    --sidebar: #202c33;
+    --chat-bg: #0b141a;
+    --item-hover: #2a3942;
+    --item-active: #2a3942;
+    --border: #2a3942;
+    --text: #e9edef;
+    --text-muted: #8696a0;
+    --green: #00a884;
+    --green-light: #005c4b;
+    --bubble-out: #005c4b;
+    --bubble-in: #202c33;
+    --badge-red: #f44336;
+    --badge-orange: #ff9800;
+    --badge-green: #00a884;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 380px; min-width: 280px;
+    background: var(--sidebar);
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+
+  .sidebar-header {
+    padding: 10px 16px;
+    background: var(--sidebar);
+    display: flex; align-items: center; justify-content: space-between;
+    height: 59px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-header .title { font-weight: 600; font-size: 1.1rem; color: var(--text); }
+  .live-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .stats-bar {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-pill {
+    flex: 1; padding: 8px 4px; text-align: center;
+    border-right: 1px solid var(--border);
+    cursor: pointer; transition: background 0.2s;
+  }
+  .stat-pill:last-child { border-right: none; }
+  .stat-pill:hover { background: var(--item-hover); }
+  .stat-pill .num { font-size: 1.2rem; font-weight: 600; }
+  .stat-pill .lbl { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; }
+  .stat-pill.hot .num { color: var(--badge-orange); }
+  .stat-pill.converted .num { color: var(--badge-green); }
+
+  .search-bar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .search-bar input {
+    width: 100%; background: var(--chat-bg); border: none; border-radius: 8px;
+    padding: 8px 12px; color: var(--text); font-family: inherit; font-size: 0.85rem;
+    outline: none;
+  }
+  .search-bar input::placeholder { color: var(--text-muted); }
+
+  .filter-tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .filter-tab {
+    padding: 8px 14px; font-size: 0.75rem; cursor: pointer;
+    color: var(--text-muted); white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .filter-tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+  .lead-list { overflow-y: auto; flex: 1; }
+
+  .lead-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; cursor: pointer;
+    border-bottom: 1px solid rgba(42,57,66,0.5);
+    transition: background 0.15s;
+  }
+  .lead-item:hover { background: var(--item-hover); }
+  .lead-item.active { background: var(--item-active); }
+
+  .avatar {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 1.1rem; flex-shrink: 0;
+    background: var(--green-light); color: var(--green);
+  }
+  .avatar.hot { background: #3d2000; color: var(--badge-orange); }
+  .avatar.converted { background: #002d1f; color: var(--badge-green); }
+  .avatar.unknown { background: #2d1500; color: #ffaa44; }
+
+  .lead-info { flex: 1; min-width: 0; }
+  .lead-name { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lead-preview { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+  .lead-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .lead-time { font-size: 0.68rem; color: var(--text-muted); }
+  .badge {
+    font-size: 0.6rem; padding: 2px 6px; border-radius: 10px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge.interested { background: rgba(255,152,0,0.2); color: var(--badge-orange); }
+  .badge.contacted { background: rgba(0,168,132,0.15); color: var(--green); }
+  .badge.converted { background: rgba(0,168,132,0.25); color: #4cff9f; }
+  .badge.new { background: rgba(134,150,160,0.2); color: var(--text-muted); }
+  .badge.unknown { background: rgba(255,170,68,0.2); color: #ffaa44; }
+
+  /* Chat panel */
+  .chat-panel {
+    flex: 1; display: flex; flex-direction: column;
+    background: var(--chat-bg);
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  .chat-header {
+    background: var(--sidebar);
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+    height: 59px;
+    border-bottom: 1px solid var(--border);
+  }
+  .chat-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--green-light); color: var(--green);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+  }
+  .chat-name { font-weight: 500; }
+  .chat-status { font-size: 0.75rem; color: var(--text-muted); }
+
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+
+  .msg { max-width: 65%; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; line-height: 1.5; position: relative; }
+  .msg.out { background: var(--bubble-out); align-self: flex-end; border-radius: 8px 0 8px 8px; }
+  .msg.in { background: var(--bubble-in); align-self: flex-start; border-radius: 0 8px 8px 8px; }
+  .msg .time { font-size: 0.65rem; color: rgba(255,255,255,0.4); margin-top: 4px; text-align: right; }
+
+  .empty-chat {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text-muted);
+  }
+  .empty-chat svg { width: 80px; height: 80px; margin-bottom: 16px; opacity: 0.3; }
+  .empty-chat p { font-size: 0.85rem; }
+
+  .date-divider {
+    text-align: center; margin: 12px 0;
+    font-size: 0.72rem; color: var(--text-muted);
+    background: rgba(17,27,33,0.8); padding: 4px 12px; border-radius: 8px;
+    align-self: center;
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <span class="title"><span class="live-dot"></span>Web GH Live</span>
+    <span style="font-size:0.7rem;color:var(--text-muted)" id="last-updated">Loading...</span>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-pill" onclick="setFilter('all')">
+      <div class="num" id="s-total">0</div>
+      <div class="lbl">Total</div>
+    </div>
+    <div class="stat-pill" onclick="setFilter('contacted')">
+      <div class="num" id="s-contacted">0</div>
+      <div class="lbl">Contacted</div>
+    </div>
+    <div class="stat-pill hot" onclick="setFilter('interested')">
+      <div class="num" id="s-interested">0</div>
+      <div class="lbl">Hot</div>
+    </div>
+    <div class="stat-pill converted" onclick="setFilter('converted')">
+      <div class="num" id="s-converted">0</div>
+      <div class="lbl">Clients</div>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Search leads..." oninput="renderList()">
+  </div>
+
+  <div class="filter-tabs">
+    <div class="filter-tab active" onclick="setFilter('all')">All</div>
+    <div class="filter-tab" onclick="setFilter('interested')">Hot Leads</div>
+    <div class="filter-tab" onclick="setFilter('replied')">Replied</div>
+    <div class="filter-tab" onclick="setFilter('contacted')">No Reply</div>
+    <div class="filter-tab" onclick="setFilter('unknown')">Unknown</div>
+    <div class="filter-tab" onclick="setFilter('converted')">Clients</div>
+  </div>
+
+  <div class="lead-list" id="lead-list"></div>
+</div>
+
+<div class="chat-panel" id="chat-panel">
+  <div class="empty-chat">
+    <svg viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+    </svg>
+    <p>Select a conversation to view</p>
+  </div>
+</div>
+
+<script>
+let allLeads = [];
+let currentFilter = 'all';
+let activeLead = null;
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  const tabs = ['all','interested','replied','contacted','unknown','converted'];
+  const idx = tabs.indexOf(f);
+  if (idx >= 0) document.querySelectorAll('.filter-tab')[idx].classList.add('active');
+  renderList();
+}
+
+function getInitials(name) {
+  if (!name) return '?';
+  return name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+}
+
+function getAvatarClass(lead) {
+  if (lead.status === 'interested') return 'hot';
+  if (lead.status === 'converted') return 'converted';
+  if (lead.unknown) return 'unknown';
+  return '';
+}
+
+function renderList() {
+  const q = document.getElementById('search').value.toLowerCase();
+  let filtered = allLeads.filter(l => {
+    if (q && !l.name?.toLowerCase().includes(q) && !l.phone?.includes(q)) return false;
+    if (currentFilter === 'all') return true;
+    if (currentFilter === 'replied') return l.replied && l.status !== 'interested';
+    if (currentFilter === 'unknown') return l.unknown;
+    if (currentFilter === 'contacted') return !l.replied && l.status === 'contacted';
+    return l.status === currentFilter;
+  });
+
+  document.getElementById('lead-list').innerHTML = filtered.map(l => `
+    <div class="lead-item ${activeLead?.phone === l.phone ? 'active' : ''}" onclick="openChat('${l.phone}')">
+      <div class="avatar ${getAvatarClass(l)}">${getInitials(l.name)}</div>
+      <div class="lead-info">
+        <div class="lead-name">${l.name || 'Unknown'}</div>
+        <div class="lead-preview">${l.last_message || l.phone}</div>
+      </div>
+      <div class="lead-meta">
+        <span class="badge ${l.unknown ? 'unknown' : l.status}">${l.unknown ? 'unknown' : l.status}</span>
+      </div>
+    </div>
+  `).join('') || '<div style="padding:20px;color:var(--text-muted);font-size:0.8rem;text-align:center">No leads found</div>';
+}
+
+function openChat(phone) {
+  activeLead = allLeads.find(l => l.phone === phone);
+  if (!activeLead) return;
+  renderList();
+
+  const convo = activeLead.conversation || [];
+  const initial = getInitials(activeLead.name);
+  const avatarClass = getAvatarClass(activeLead);
+
+  document.getElementById('chat-panel').innerHTML = `
+    <div class="chat-header">
+      <div class="chat-avatar ${avatarClass}">${initial}</div>
+      <div>
+        <div class="chat-name">${activeLead.name || 'Unknown'}</div>
+        <div class="chat-status">${activeLead.phone} · ${activeLead.category || 'N/A'} · <span class="badge ${activeLead.status}">${activeLead.status}</span></div>
+      </div>
+    </div>
+    <div class="chat-messages" id="msgs">
+      ${convo.length === 0 ? '<div class="empty-chat" style="flex:1"><p>No messages yet</p></div>' :
+        convo.map(m => `
+          <div class="msg ${m.role === 'assistant' ? 'out' : 'in'}">
+            ${m.content}
+            <div class="time">${m.time ? new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}</div>
+          </div>
+        `).join('')
+      }
+    </div>
+  `;
+  const msgs = document.getElementById('msgs');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch('/dashboard-data');
+    const data = await res.json();
+
+    document.getElementById('s-total').textContent = data.total;
+    document.getElementById('s-contacted').textContent = data.contacted;
+    document.getElementById('s-interested').textContent = data.interested;
+    document.getElementById('s-converted').textContent = data.converted;
+    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+
+    allLeads = data.leads;
+    renderList();
+
+    // Refresh active chat if open
+    if (activeLead) {
+      const updated = allLeads.find(l => l.phone === activeLead.phone);
+      if (updated) { activeLead = updated; openChat(activeLead.phone); }
+    }
+  } catch(e) { console.error(e); }
+}
+
+fetchData();
+setInterval(fetchData, 3000); // Refresh every 3 seconds — near live
+</script>
+</body>
+</html>
