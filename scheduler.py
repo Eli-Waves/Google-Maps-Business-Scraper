@@ -19,6 +19,8 @@ CATEGORIES = [
 city_index = [0]
 category_index = [0]
 
+OWNER_PHONE = "233530123985"
+
 
 def get_next_query():
     city = GHANA_CITIES[city_index[0] % len(GHANA_CITIES)]
@@ -34,7 +36,11 @@ def run_outreach():
 
     if not leads:
         print("[!] No new leads to contact")
+        send_message(OWNER_PHONE, "Outreach triggered but no new leads found.")
         return
+
+    # Notify owner first
+    send_message(OWNER_PHONE, f"Outreach starting now. Messaging {len(leads)} businesses. You will get Telegram alerts for hot leads.")
 
     success = 0
     for lead in leads:
@@ -51,4 +57,5 @@ def run_outreach():
             print(f"  [!] Failed for {name} ({phone}): {e}")
         time.sleep(12)
 
+    send_message(OWNER_PHONE, f"Outreach done. Messaged {success}/{len(leads)} businesses.")
     print(f"[✓] Outreach done: {success}/{len(leads)}")
