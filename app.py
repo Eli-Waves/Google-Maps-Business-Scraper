@@ -197,49 +197,91 @@ async def receive_message(request: Request):
 
     # ── Owner commands ────────────────────────────────────────────────────────
     if phone == OWNER_PHONE:
-        msg_lower = user_message.lower()
 
-        if any(w in msg_lower for w in ["stat", "progress", "report", "how are"]):
+        # Use AI to interpret what the owner wants
+        intent_response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "system",
+                "content": """You are a command interpreter for a WhatsApp sales bot. 
+Classify the owner's message into exactly one of these intents and respond with ONLY the intent name and any extracted parameter, nothing else:
+
+STATS - owner wants a progress report or asks how things are going
+SCRAPE:[query] - owner wants to find new businesses. Extract the search query if mentioned, else use "auto"
+OUTREACH - owner wants to message new leads
+CONVERSATION:[name_or_phone] - owner wants to see or ask about a specific lead's conversation
+CONVERTED:[name_or_phone] - owner says a deal was closed or a client was won
+HELP - owner wants to know what commands are available
+UNKNOWN - none of the above
+
+Examples:
+"how's it going?" -> STATS
+"find restaurants in Kumasi" -> SCRAPE:restaurants in Kumasi Ghana
+"message the new leads" -> OUTREACH
+"what did Treehouse say?" -> CONVERSATION:Treehouse
+"Treehouse just paid" -> CONVERTED:Treehouse
+"what can you do?" -> HELP"""
+            }, {
+                "role": "user",
+                "content": user_message
+            }],
+            max_tokens=50,
+            temperature=0,
+        )
+
+        intent = intent_response.choices[0].message.content.strip()
+        print(f"[Owner intent]: {intent}")
+
+        if intent.startswith("STATS"):
             send_message(phone, get_stats())
 
-        elif msg_lower.startswith("conversation ") or msg_lower.startswith("chat "):
-            search = user_message.split(" ", 1)[1].strip()
-            send_message(phone, get_conversation_summary(search))
-
-        elif msg_lower.startswith("converted ") or msg_lower.startswith("closed "):
-            search = user_message.split(" ", 1)[1].strip()
-            send_message(phone, mark_converted(search))
-
-        elif "scrape" in msg_lower:
-            send_message(phone, "Starting scrape now, will update you when done...")
-            def do_scrape():
-                query = get_next_query()
-                leads = scrape_businesses(query, limit=20)
+        elif intent.startswith("SCRAPE"):
+            parts = intent.split(":", 1)
+            query = parts[1].strip() if len(parts) > 1 and parts[1].strip() != "auto" else None
+            send_message(phone, "On it, finding new businesses now...")
+            def do_scrape(q=query):
+                actual_query = q or get_next_query()
+                leads = scrape_businesses(actual_query, limit=20)
                 saved = 0
                 for lead in leads:
                     if lead.get("phone"):
                         upsert_lead(lead)
                         saved += 1
-                send_message(OWNER_PHONE, f"Scrape done! Saved {saved} new businesses from: {query}")
+                send_message(OWNER_PHONE, f"Done! Saved {saved} new businesses from: {actual_query}")
             threading.Thread(target=do_scrape, daemon=True).start()
 
-        elif "outreach" in msg_lower:
+        elif intent.startswith("OUTREACH"):
             send_message(phone, "Starting outreach now...")
             threading.Thread(target=run_outreach, daemon=True).start()
 
-        elif "help" in msg_lower:
+        elif intent.startswith("CONVERSATION"):
+            parts = intent.split(":", 1)
+            search = parts[1].strip() if len(parts) > 1 else ""
+            if search:
+                send_message(phone, get_conversation_summary(search))
+            else:
+                send_message(phone, "Who do you want to know about? Say their name or number.")
+
+        elif intent.startswith("CONVERTED"):
+            parts = intent.split(":", 1)
+            search = parts[1].strip() if len(parts) > 1 else ""
+            if search:
+                send_message(phone, mark_converted(search))
+            else:
+                send_message(phone, "Who closed the deal? Say their name or number.")
+
+        elif intent.startswith("HELP"):
             send_message(phone, (
-                "Web GH Bot Commands:\n\n"
-                "stats - AI progress briefing\n"
-                "scrape - find new businesses\n"
-                "outreach - message new leads\n"
-                "conversation [name] - summarize a lead's chat\n"
-                "converted [name] - mark a deal as closed\n"
-                "help - show this menu"
+                "Just talk to me naturally! For example:\n\n"
+                "\"How's it going?\" - get a progress report\n"
+                "\"Find salons in Accra\" - scrape new leads\n"
+                "\"Message the new leads\" - start outreach\n"
+                "\"What did Treehouse say?\" - see a conversation\n"
+                "\"Treehouse just paid\" - mark as converted"
             ))
 
         else:
-            send_message(phone, "Hey! Send 'help' to see available commands.")
+            send_message(phone, "I didn't quite get that. Try asking 'how's it going?' or 'help' for options.")
 
         return {"status": "ok"}
 
