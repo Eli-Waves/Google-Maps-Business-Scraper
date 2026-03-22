@@ -81,10 +81,10 @@ def parse_incoming(data: dict) -> dict | None:
         return None
 
 
-FIRST_MESSAGE_TEMPLATE = """Hello {name}! I noticed your business might not have a website yet. A professional website helps you get more customers online and builds credibility.
-
-We build clean, fast websites for businesses in Ghana — fully set up in 48 hours. Would you be interested in learning more?"""
+FIRST_MESSAGE_TEMPLATE = "Hi, I came across your business and noticed you might not have a website yet. We help businesses in Ghana get online with a clean professional site in 48hrs. Would that be something you'd be interested in?"
 
 
 def first_outreach_message(business_name: str) -> str:
-    return FIRST_MESSAGE_TEMPLATE.format(name=business_name)
+    # Clean the name — remove address suffixes like ", Osu, Accra"
+    clean_name = business_name.split(",")[0].strip()
+    return FIRST_MESSAGE_TEMPLATE
