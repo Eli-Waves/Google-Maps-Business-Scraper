@@ -7,19 +7,24 @@ from whatsapp import send_message, first_outreach_message
 
 GHANA_CITIES = [
     "Accra", "Kumasi", "Tamale", "Takoradi", "Cape Coast",
-    "Sunyani", "Koforidua", "Ho", "Bolgatanga", "Wa"
+    "Sunyani", "Koforidua", "Ho", "Bolgatanga", "Wa",
+    "Tema", "Ashaiman", "Kasoa", "Madina", "Spintex",
+    "Osu", "Adenta", "Dome", "Lapaz", "Abeka"
 ]
 
 CATEGORIES = [
     "restaurants", "hotels", "salons", "pharmacies", "supermarkets",
     "schools", "clinics", "car rentals", "event centers", "guest houses",
-    "boutiques", "hardware stores", "printing shops", "logistics companies"
+    "boutiques", "hardware stores", "printing shops", "logistics companies",
+    "barbershops", "gyms", "churches", "bakeries", "laundry services",
+    "auto repair shops", "electronics shops", "furniture stores", "travel agencies",
+    "photography studios", "catering services", "daycare centers", "real estate"
 ]
 
 city_index = [0]
 category_index = [0]
 
-OWNER_PHONE = "233530123985"
+ADMIN_PHONES = ["233530123985", "233557808489"]
 
 
 def get_next_query():
@@ -36,11 +41,7 @@ def run_outreach():
 
     if not leads:
         print("[!] No new leads to contact")
-        send_message(OWNER_PHONE, "Outreach triggered but no new leads found.")
         return
-
-    # Notify owner first
-    send_message(OWNER_PHONE, f"Outreach starting now. Messaging {len(leads)} businesses. You will get Telegram alerts for hot leads.")
 
     success = 0
     for lead in leads:
@@ -48,7 +49,7 @@ def run_outreach():
         name = lead["name"] or "there"
         try:
             message = first_outreach_message(name)
-            send_message(phone, message)
+            send_message(phone, message, typing_delay=False)
             append_message(phone, "assistant", message)
             update_lead_status(phone, "contacted")
             print(f"  [✓] Messaged {name} ({phone})")
@@ -57,5 +58,9 @@ def run_outreach():
             print(f"  [!] Failed for {name} ({phone}): {e}")
         time.sleep(12)
 
-    send_message(OWNER_PHONE, f"Outreach done. Messaged {success}/{len(leads)} businesses.")
+    for admin in ADMIN_PHONES:
+        try:
+            send_message(admin, f"Outreach done. Messaged {success}/{len(leads)} businesses.", typing_delay=False)
+        except:
+            pass
     print(f"[✓] Outreach done: {success}/{len(leads)}")
