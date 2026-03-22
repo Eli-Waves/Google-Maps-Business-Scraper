@@ -24,7 +24,11 @@ app = FastAPI(title="Web Agency Bot")
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "my_verify_token_123")
 SECRET_KEY = os.getenv("SECRET_KEY", "webgh_secret")
 SELF_URL = "https://google-maps-business-scraper.onrender.com/ping"
-OWNER_PHONE = "233530123985"
+OWNER_PHONE = "233530123985"   # Icon
+ADMIN_PHONES = {
+    "233530123985": "Icon",
+    "233557808489": "Eli",
+}
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
@@ -40,12 +44,11 @@ def self_ping():
 
 
 def auto_scrape_and_outreach():
-    """Runs scrape + outreach at 8am, 12pm, 4pm, 8pm automatically."""
-    print("[⏰] Auto scheduler running...")
+    """Runs scrape + outreach every 30 minutes automatically."""
+    print("[⏰] Auto scheduler running — every 30 mins...")
+    time.sleep(60)  # Wait for startup
     while True:
-        now = datetime.now()
-        if now.hour in (8, 12, 16, 20) and now.minute == 0:
-            send_message(OWNER_PHONE, f"Auto scrape starting ({now.hour}:00)...")
+        try:
             query = get_next_query()
             leads = scrape_businesses(query, limit=20)
             saved = 0
@@ -53,11 +56,14 @@ def auto_scrape_and_outreach():
                 if lead.get("phone"):
                     upsert_lead(lead)
                     saved += 1
-            send_message(OWNER_PHONE, f"Scraped {saved} businesses. Messaging in 10 seconds...")
-            time.sleep(10)
-            run_outreach()
-            time.sleep(60)
-        time.sleep(30)
+            if saved > 0:
+                for admin in ADMIN_PHONES:
+                    send_message(admin, f"Auto-scraped {saved} new businesses from: {query}. Messaging them now...")
+                time.sleep(10)
+                run_outreach()
+        except Exception as e:
+            print(f"[!] Auto scrape error: {e}")
+        time.sleep(1800)  # 30 minutes
 
 
 def follow_up_no_reply():
@@ -231,16 +237,17 @@ async def receive_message(request: Request):
 
     print(f"[↓] Message from {phone}: {user_message}")
 
-    # ── Owner commands ────────────────────────────────────────────────────────
-    if phone == OWNER_PHONE:
+    # ── Owner/Admin commands ──────────────────────────────────────────────────
+    if phone in ADMIN_PHONES:
 
         # Deduplicate — ignore if same message was processed in last 10 seconds
         if not hasattr(app, "_last_owner_msg"):
             app._last_owner_msg = {}
-        last = app._last_owner_msg.get(user_message, 0)
+        dedup_key = f"{phone}:{user_message}"
+        last = app._last_owner_msg.get(dedup_key, 0)
         if time.time() - last < 10:
             return {"status": "duplicate"}
-        app._last_owner_msg[user_message] = time.time()
+        app._last_owner_msg[dedup_key] = time.time()
 
         # Pull all relevant data
         conn = sqlite3.connect("leads.db")
@@ -405,10 +412,10 @@ ACTIONS (only if explicitly asked):
         enriched_lead["conversation_summary"] = convo_text
         update_lead_status(phone, "interested")
         notify_hot_lead(enriched_lead)
-        # Also notify owner via WhatsApp with full details
+        # Notify all admins via WhatsApp
         history = get_conversation(phone)
         last_msgs = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:]])
-        send_message(OWNER_PHONE, 
+        alert = (
             f"Hot lead alert!\n\n"
             f"Name: {lead['name']}\n"
             f"Phone: {lead['phone']}\n"
@@ -416,6 +423,8 @@ ACTIONS (only if explicitly asked):
             f"Address: {lead.get('address') or 'N/A'}\n\n"
             f"Last messages:\n{last_msgs}"
         )
+        for admin in ADMIN_PHONES:
+            send_message(admin, alert)
         print(f"  🔥 HOT LEAD: {lead['name']} ({phone})")
     else:
         update_lead_status(phone, "contacted")
@@ -458,6 +467,45 @@ def trigger_outreach(key: str = Query(None)):
 @app.get("/")
 def health():
     return {"status": "running", "service": "Web Agency Bot"}
+
+
+@app.get("/dashboard")
+def dashboard():
+    from fastapi.responses import HTMLResponse
+    with open("dashboard.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/dashboard-data")
+def dashboard_data():
+    conn = sqlite3.connect("leads.db")
+    conn.row_factory = sqlite3.Row
+    total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+    contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
+    interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
+    converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
+
+    rows = conn.execute("SELECT * FROM leads ORDER BY updated_at DESC").fetchall()
+    conn.close()
+
+    leads = []
+    for row in rows:
+        convo = json.loads(row["conversation"] or "[]")
+        has_user = any(m["role"] == "user" for m in convo)
+        last_msg = convo[-1]["content"][:80] if convo else None
+        is_unknown = not row["maps_url"]
+
+        leads.append({
+            "name": row["name"],
+            "phone": row["phone"],
+            "category": row["category"],
+            "status": row["status"],
+            "replied": has_user,
+            "unknown": is_unknown and has_user,
+            "last_message": last_msg,
+        })
+
+    return {"total": total, "contacted": contacted, "interested": interested, "converted": converted, "leads": leads}
 
 
 @app.get("/ping")
