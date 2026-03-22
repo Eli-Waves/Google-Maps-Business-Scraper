@@ -48,6 +48,11 @@ def run_outreach():
         phone = lead["phone"]
         name = lead["name"] or "there"
         try:
+            # Double-check status to prevent duplicate sends
+            from database import get_lead_by_phone
+            current = get_lead_by_phone(phone)
+            if current and current["status"] != "new":
+                continue
             message = first_outreach_message(name)
             send_message(phone, message, typing_delay=False)
             append_message(phone, "assistant", message)
