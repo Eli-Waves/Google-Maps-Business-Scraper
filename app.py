@@ -82,12 +82,18 @@ def get_stats() -> str:
 
     conn.close()
 
-    prompt = f"""You are a WhatsApp assistant for Web GH agency owner in Ghana. Give a very short 2-3 sentence update. Be casual like a friend texting.
+    prompt = f"""You are a WhatsApp assistant for Web GH agency owner in Ghana. Give a very short 2-3 sentence update then suggest ONE specific next action based on the numbers. Be casual like a friend texting.
 
 Numbers: {total} total, {new} new, {contacted} contacted, {interested} interested, {converted} converted.
 Hot leads:{hot_summary if hot_summary else " none yet"}
 
-Keep it short and casual. Max 3 sentences."""
+Logic for suggestion:
+- If new > 0: suggest running outreach
+- If new == 0 and total < 10: suggest scraping more businesses
+- If interested > 0: suggest following up with the hot leads
+- If contacted > 20 and interested == 0: suggest scraping a different category
+
+Keep it short and casual. Max 3 sentences total including the suggestion."""
 
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -192,83 +198,111 @@ async def receive_message(request: Request):
     # ── Owner commands ────────────────────────────────────────────────────────
     if phone == OWNER_PHONE:
 
-        # Use AI to interpret what the owner wants
-        intent_response = groq_client.chat.completions.create(
+        # Pull all relevant data to give AI full context
+        conn = sqlite3.connect("leads.db")
+        conn.row_factory = sqlite3.Row
+        total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        new = conn.execute("SELECT COUNT(*) FROM leads WHERE status='new'").fetchone()[0]
+        contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
+        interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
+        converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
+
+        # Recent contacted leads
+        recent = conn.execute(
+            "SELECT name, phone, category, address FROM leads WHERE status='contacted' ORDER BY updated_at DESC LIMIT 10"
+        ).fetchall()
+        recent_list = "\n".join([f"- {r['name']} | {r['phone']} | {r['category']}" for r in recent])
+
+        # Hot leads with conversations
+        hot = conn.execute(
+            "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 5"
+        ).fetchall()
+        hot_detail = ""
+        for h in hot:
+            convo = json.loads(h["conversation"] or "[]")
+            msgs = " | ".join([f"{m['role']}: {m['content'][:80]}" for m in convo[-4:]])
+            hot_detail += f"\n- {h['name']} ({h['phone']}): {msgs}"
+
+        # Check if owner is asking about a specific lead
+        specific_lead = None
+        all_leads = conn.execute("SELECT name, phone, conversation, status FROM leads").fetchall()
+        for lead in all_leads:
+            if lead["name"] and lead["name"].lower() in user_message.lower():
+                convo = json.loads(lead["conversation"] or "[]")
+                convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in convo])
+                specific_lead = f"Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}\nConversation:\n{convo_text}"
+                break
+
+        conn.close()
+
+        system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana. You have full access to the bot's data and can take actions.
+
+CURRENT DATA:
+- Total leads: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
+
+RECENTLY CONTACTED:
+{recent_list if recent_list else "None yet"}
+
+HOT LEADS (interested):
+{hot_detail if hot_detail else "None yet"}
+
+{f"SPECIFIC LEAD INFO:{chr(10)}{specific_lead}" if specific_lead else ""}
+
+ACTIONS YOU CAN TRIGGER (add these tags at the end of your reply if needed):
+[DO:SCRAPE] - to find new businesses
+[DO:OUTREACH] - to message new leads
+[DO:CONVERTED:phone] - to mark a lead as converted
+
+INSTRUCTIONS:
+- Be casual and conversational like a smart friend
+- Keep replies short (2-4 sentences max)
+- Always suggest a next action based on the data
+- If owner asks about a specific business, use the conversation data
+- If owner says someone paid or signed up, use [DO:CONVERTED:phone]
+- Never be robotic or use bullet points"""
+
+        response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{
-                "role": "system",
-                "content": """Classify this message into one intent. Reply with ONLY the intent, nothing else.
-
-STATS - asking about progress, updates, how things are going, numbers
-SCRAPE:[query] - wants to find businesses. Extract what to search or use "auto"
-OUTREACH - wants to send messages to leads
-CONVERSATION:[name] - asking about a specific person or business
-CONVERTED:[name] - saying someone paid, closed, signed up, became a client
-HELP - asking what the bot can do
-
-If unsure, reply UNKNOWN."""
-            }, {
-                "role": "user",
-                "content": user_message
-            }],
-            max_tokens=30,
-            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            max_tokens=250,
+            temperature=0.7,
         )
 
-        intent = intent_response.choices[0].message.content.strip()
-        print(f"[Owner intent]: {intent}")
+        reply = response.choices[0].message.content.strip()
 
-        if intent.startswith("STATS"):
-            send_message(phone, get_stats())
-
-        elif intent.startswith("SCRAPE"):
-            parts = intent.split(":", 1)
-            query = parts[1].strip() if len(parts) > 1 and parts[1].strip() != "auto" else None
-            send_message(phone, "On it, finding new businesses now...")
-            def do_scrape(q=query):
-                actual_query = q or get_next_query()
-                leads = scrape_businesses(actual_query, limit=20)
+        # Handle action tags
+        if "[DO:SCRAPE]" in reply:
+            reply = reply.replace("[DO:SCRAPE]", "").strip()
+            def do_scrape():
+                query = get_next_query()
+                leads = scrape_businesses(query, limit=20)
                 saved = 0
                 for lead in leads:
                     if lead.get("phone"):
                         upsert_lead(lead)
                         saved += 1
-                send_message(OWNER_PHONE, f"Done! Saved {saved} new businesses from: {actual_query}")
+                send_message(OWNER_PHONE, f"Done! Saved {saved} businesses from: {query}")
             threading.Thread(target=do_scrape, daemon=True).start()
 
-        elif intent.startswith("OUTREACH"):
-            send_message(phone, "Starting outreach now...")
+        if "[DO:OUTREACH]" in reply:
+            reply = reply.replace("[DO:OUTREACH]", "").strip()
             threading.Thread(target=run_outreach, daemon=True).start()
 
-        elif intent.startswith("CONVERSATION"):
-            parts = intent.split(":", 1)
-            search = parts[1].strip() if len(parts) > 1 else ""
-            if search:
-                send_message(phone, get_conversation_summary(search))
-            else:
-                send_message(phone, "Who do you want to know about? Say their name or number.")
+        if "[DO:CONVERTED:" in reply:
+            import re
+            match = re.search(r'\[DO:CONVERTED:([^\]]+)\]', reply)
+            if match:
+                target_phone = match.group(1)
+                conn2 = sqlite3.connect("leads.db")
+                conn2.execute("UPDATE leads SET status='converted' WHERE phone=?", (target_phone,))
+                conn2.commit()
+                conn2.close()
+                reply = re.sub(r'\[DO:CONVERTED:[^\]]+\]', '', reply).strip()
 
-        elif intent.startswith("CONVERTED"):
-            parts = intent.split(":", 1)
-            search = parts[1].strip() if len(parts) > 1 else ""
-            if search:
-                send_message(phone, mark_converted(search))
-            else:
-                send_message(phone, "Who closed the deal? Say their name or number.")
-
-        elif intent.startswith("HELP"):
-            send_message(phone, (
-                "Just talk to me naturally! For example:\n\n"
-                "\"How's it going?\" - get a progress report\n"
-                "\"Find salons in Accra\" - scrape new leads\n"
-                "\"Message the new leads\" - start outreach\n"
-                "\"What did Treehouse say?\" - see a conversation\n"
-                "\"Treehouse just paid\" - mark as converted"
-            ))
-
-        else:
-            send_message(phone, "I didn't quite get that. Try asking 'how's it going?' or 'help' for options.")
-
+        send_message(phone, reply)
         return {"status": "ok"}
 
     # ── Regular lead handling ─────────────────────────────────────────────────
