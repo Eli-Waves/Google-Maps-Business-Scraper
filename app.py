@@ -198,7 +198,15 @@ async def receive_message(request: Request):
     # ── Owner commands ────────────────────────────────────────────────────────
     if phone == OWNER_PHONE:
 
-        # Pull all relevant data to give AI full context
+        # Deduplicate — ignore if same message was processed in last 10 seconds
+        if not hasattr(app, "_last_owner_msg"):
+            app._last_owner_msg = {}
+        last = app._last_owner_msg.get(user_message, 0)
+        if time.time() - last < 10:
+            return {"status": "duplicate"}
+        app._last_owner_msg[user_message] = time.time()
+
+        # Pull all relevant data
         conn = sqlite3.connect("leads.db")
         conn.row_factory = sqlite3.Row
         total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
@@ -207,13 +215,11 @@ async def receive_message(request: Request):
         interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
         converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
 
-        # Recent contacted leads
         recent = conn.execute(
-            "SELECT name, phone, category, address FROM leads WHERE status='contacted' ORDER BY updated_at DESC LIMIT 10"
+            "SELECT name, phone, category FROM leads WHERE status='contacted' ORDER BY updated_at DESC LIMIT 10"
         ).fetchall()
         recent_list = "\n".join([f"- {r['name']} | {r['phone']} | {r['category']}" for r in recent])
 
-        # Hot leads with conversations
         hot = conn.execute(
             "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 5"
         ).fetchall()
@@ -223,7 +229,6 @@ async def receive_message(request: Request):
             msgs = " | ".join([f"{m['role']}: {m['content'][:80]}" for m in convo[-4:]])
             hot_detail += f"\n- {h['name']} ({h['phone']}): {msgs}"
 
-        # Check if owner is asking about a specific lead
         specific_lead = None
         all_leads = conn.execute("SELECT name, phone, conversation, status FROM leads").fetchall()
         for lead in all_leads:
@@ -232,34 +237,31 @@ async def receive_message(request: Request):
                 convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in convo])
                 specific_lead = f"Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}\nConversation:\n{convo_text}"
                 break
-
         conn.close()
 
-        system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana. You have full access to the bot's data and can take actions.
+        system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana.
 
 CURRENT DATA:
-- Total leads: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
+- Total: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
 
 RECENTLY CONTACTED:
 {recent_list if recent_list else "None yet"}
 
-HOT LEADS (interested):
+HOT LEADS:
 {hot_detail if hot_detail else "None yet"}
 
-{f"SPECIFIC LEAD INFO:{chr(10)}{specific_lead}" if specific_lead else ""}
+{f"SPECIFIC LEAD:{chr(10)}{specific_lead}" if specific_lead else ""}
 
-ACTIONS YOU CAN TRIGGER (add these tags at the end of your reply if needed):
-[DO:SCRAPE] - to find new businesses
-[DO:OUTREACH] - to message new leads
-[DO:CONVERTED:phone] - to mark a lead as converted
+RULES:
+- Be casual and short (2-3 sentences max)
+- ONLY add action tags if the owner EXPLICITLY asks you to do that action
+- Do NOT suggest or start actions on your own
+- No bullet points
 
-INSTRUCTIONS:
-- Be casual and conversational like a smart friend
-- Keep replies short (2-4 sentences max)
-- Always suggest a next action based on the data
-- If owner asks about a specific business, use the conversation data
-- If owner says someone paid or signed up, use [DO:CONVERTED:phone]
-- Never be robotic or use bullet points"""
+ACTIONS (only use if explicitly requested):
+[DO:SCRAPE] - only if owner says "scrape", "find businesses", "search for leads"
+[DO:OUTREACH] - only if owner says "send messages", "do outreach", "message leads"
+[DO:CONVERTED:phone] - only if owner says someone paid or signed up"""
 
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -267,7 +269,7 @@ INSTRUCTIONS:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            max_tokens=250,
+            max_tokens=200,
             temperature=0.7,
         )
 
