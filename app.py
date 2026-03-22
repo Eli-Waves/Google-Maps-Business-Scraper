@@ -100,8 +100,12 @@ async def receive_message(request: Request):
             def do_scrape():
                 query = get_next_query()
                 leads = scrape_businesses(query, limit=20)
-                saved = sum(1 for l in leads if l.get("phone"))
-                send_message(OWNER_PHONE, f"Scrape done! Found {saved} new businesses from: {query}")
+                saved = 0
+                for lead in leads:
+                    if lead.get("phone"):
+                        upsert_lead(lead)
+                        saved += 1
+                send_message(OWNER_PHONE, f"Scrape done! Saved {saved} new businesses from: {query}")
             threading.Thread(target=do_scrape, daemon=True).start()
             return {"status": "ok"}
 
