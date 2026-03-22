@@ -42,38 +42,28 @@ def get_next_query():
     return f"{category} in {city} Ghana"
 
 
-def scrape_until_target(target: int = TARGET_LEADS) -> int:
-    """Keep scraping different queries until we find `target` businesses without websites."""
+def scrape_until_target(target: int = 20) -> int:
+    """Scrape one query and save leads."""
     from database import upsert_lead
-    saved = 0
-    attempts = 0
-    max_attempts = 20  # prevent infinite loop
-
-    while saved < target and attempts < max_attempts:
-        query = get_next_query()
-        print(f"[+] Scraping: {query} (have {saved}/{target} so far)")
-        try:
-            leads = scrape_businesses(query, limit=20)
-            for lead in leads:
-                if lead.get("phone"):
-                    upsert_lead(lead)
-                    saved += 1
-            if saved >= target:
-                break
-        except Exception as e:
-            print(f"[!] Scrape error: {e}")
-            if "402" in str(e) or "Payment" in str(e):
-                print("[!] Apify credits exhausted — stopping scrape")
-                for admin in ADMIN_PHONES:
-                    try:
-                        send_message(admin, "Apify credits ran out. Top up at console.apify.com to continue scraping.", typing_delay=False)
-                    except: pass
-                break
-        attempts += 1
-        time.sleep(3)  # small delay between queries
-
-    print(f"[✓] Scrape complete: {saved} businesses saved after {attempts} queries")
-    return saved
+    query = get_next_query()
+    print(f"[+] Scraping: {query}")
+    try:
+        leads = scrape_businesses(query, limit=20)
+        saved = 0
+        for lead in leads:
+            if lead.get("phone"):
+                upsert_lead(lead)
+                saved += 1
+        print(f"[✓] Saved {saved} leads")
+        return saved
+    except Exception as e:
+        print(f"[!] Scrape error: {e}")
+        if "402" in str(e) or "Payment" in str(e):
+            for admin in ADMIN_PHONES:
+                try:
+                    send_message(admin, "Apify credits ran out. Top up at console.apify.com.", typing_delay=False)
+                except: pass
+        return 0
 
 
 def run_outreach():
