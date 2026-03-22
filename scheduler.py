@@ -4,6 +4,7 @@ Scheduler helpers
 import time
 from database import get_new_leads, update_lead_status, append_message
 from whatsapp import send_message, first_outreach_message
+from scraper import scrape_businesses
 
 GHANA_CITIES = [
     "Accra", "Kumasi", "Tamale", "Takoradi", "Cape Coast",
@@ -12,19 +13,25 @@ GHANA_CITIES = [
     "Osu", "Adenta", "Dome", "Lapaz", "Abeka"
 ]
 
+# Prioritize categories less likely to have websites
 CATEGORIES = [
-    "restaurants", "hotels", "salons", "pharmacies", "supermarkets",
-    "schools", "clinics", "car rentals", "event centers", "guest houses",
-    "boutiques", "hardware stores", "printing shops", "logistics companies",
-    "barbershops", "gyms", "churches", "bakeries", "laundry services",
-    "auto repair shops", "electronics shops", "furniture stores", "travel agencies",
-    "photography studios", "catering services", "daycare centers", "real estate"
+    "chop bars", "drinking spots", "barbershops", "hair salons",
+    "tailors", "spare parts shops", "mechanics", "provisions stores",
+    "cold stores", "phone repair shops", "furniture makers",
+    "welding shops", "building materials", "paint shops",
+    "electrical shops", "event decorators", "bakeries", "pastry shops",
+    "daycare centers", "kindergartens", "private schools",
+    "tutoring centers", "laundry services", "printing shops",
+    "photo studios", "restaurants", "hotels", "salons", "pharmacies",
+    "supermarkets", "clinics", "guest houses", "boutiques",
+    "hardware stores", "logistics companies", "gyms"
 ]
 
 city_index = [0]
 category_index = [0]
 
 ADMIN_PHONES = ["233530123985", "233557808489"]
+TARGET_LEADS = 40
 
 
 def get_next_query():
@@ -33,6 +40,33 @@ def get_next_query():
     city_index[0] += 1
     category_index[0] += 1
     return f"{category} in {city} Ghana"
+
+
+def scrape_until_target(target: int = TARGET_LEADS) -> int:
+    """Keep scraping different queries until we find `target` businesses without websites."""
+    from database import upsert_lead
+    saved = 0
+    attempts = 0
+    max_attempts = 20  # prevent infinite loop
+
+    while saved < target and attempts < max_attempts:
+        query = get_next_query()
+        print(f"[+] Scraping: {query} (have {saved}/{target} so far)")
+        try:
+            leads = scrape_businesses(query, limit=20)
+            for lead in leads:
+                if lead.get("phone"):
+                    upsert_lead(lead)
+                    saved += 1
+            if saved >= target:
+                break
+        except Exception as e:
+            print(f"[!] Scrape error: {e}")
+        attempts += 1
+        time.sleep(3)  # small delay between queries
+
+    print(f"[✓] Scrape complete: {saved} businesses saved after {attempts} queries")
+    return saved
 
 
 def run_outreach():
@@ -48,7 +82,6 @@ def run_outreach():
         phone = lead["phone"]
         name = lead["name"] or "there"
         try:
-            # Double-check status to prevent duplicate sends
             from database import get_lead_by_phone
             current = get_lead_by_phone(phone)
             if current and current["status"] != "new":
