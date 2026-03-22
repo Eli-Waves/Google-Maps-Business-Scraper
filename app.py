@@ -66,6 +66,46 @@ def auto_scrape_and_outreach():
         time.sleep(1800)  # 30 minutes
 
 
+def follow_up_hot_leads():
+    """Follow up with hot leads after 24hrs if not converted."""
+    print("[⏰] Hot lead follow-up checker running...")
+    while True:
+        try:
+            conn, db = __import__('database').get_conn()
+            cur = conn.cursor()
+            if db == "pg":
+                cur.execute("""
+                    SELECT * FROM leads 
+                    WHERE status = 'interested' 
+                    AND updated_at < NOW() - INTERVAL '24 hours'
+                """)
+            else:
+                cur.execute("""
+                    SELECT * FROM leads 
+                    WHERE status = 'interested' 
+                    AND updated_at < datetime('now', '-24 hours')
+                """)
+            rows = cur.fetchall()
+            from database import row_to_dict
+            leads_to_follow = [row_to_dict(r, db, cur) for r in rows]
+            cur.close()
+            conn.close()
+
+            for lead in leads_to_follow:
+                if lead.get("phone"):
+                    try:
+                        msg = "Hey, just checking in — are you still interested in getting a website for your business? We'd love to help."
+                        send_message(lead["phone"], msg)
+                        append_message(lead["phone"], "assistant", msg)
+                        print(f"  [↻] Hot lead follow-up sent to {lead['name']}")
+                    except Exception as e:
+                        print(f"  [!] Follow-up failed: {e}")
+                    time.sleep(10)
+        except Exception as e:
+            print(f"[!] Hot lead follow-up error: {e}")
+        time.sleep(3600)
+
+
 def follow_up_no_reply():
     """Send a follow-up to businesses that haven't replied after 24 hours."""
     print("[⏰] Follow-up checker running...")
@@ -210,6 +250,7 @@ def startup():
     threading.Thread(target=self_ping, daemon=True).start()
     threading.Thread(target=auto_scrape_and_outreach, daemon=True).start()
     threading.Thread(target=follow_up_no_reply, daemon=True).start()
+    threading.Thread(target=follow_up_hot_leads, daemon=True).start()
     print("[✓] App started")
 
 
@@ -478,35 +519,61 @@ def dashboard():
 
 @app.get("/dashboard-data")
 def dashboard_data():
-    conn = sqlite3.connect("leads.db")
-    conn.row_factory = sqlite3.Row
-    total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
-    contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
-    interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
-    converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
+    from database import get_all_leads, get_revenue
+    import sqlite3 as _sq
 
-    rows = conn.execute("SELECT * FROM leads ORDER BY updated_at DESC").fetchall()
-    conn.close()
+    # Get counts
+    try:
+        conn, db = __import__('database').get_conn()
+        cur = conn.cursor()
+        def count(q, params=()):
+            cur.execute(q, params)
+            return cur.fetchone()[0]
+        if db == "pg":
+            total = count("SELECT COUNT(*) FROM leads")
+            contacted = count("SELECT COUNT(*) FROM leads WHERE status='contacted'")
+            interested = count("SELECT COUNT(*) FROM leads WHERE status='interested'")
+            converted = count("SELECT COUNT(*) FROM leads WHERE status='converted'")
+        else:
+            total = count("SELECT COUNT(*) FROM leads")
+            contacted = count("SELECT COUNT(*) FROM leads WHERE status='contacted'")
+            interested = count("SELECT COUNT(*) FROM leads WHERE status='interested'")
+            converted = count("SELECT COUNT(*) FROM leads WHERE status='converted'")
+        cur.close()
+        conn.close()
+    except:
+        total = contacted = interested = converted = 0
+
+    revenue = get_revenue()
+    rows = get_all_leads()
 
     leads = []
     for row in rows:
-        convo = json.loads(row["conversation"] or "[]")
+        convo = json.loads(row.get("conversation") or "[]")
         has_user = any(m["role"] == "user" for m in convo)
         last_msg = convo[-1]["content"][:80] if convo else None
-        is_unknown = not row["maps_url"]
+        is_unknown = not row.get("maps_url")
 
         leads.append({
-            "name": row["name"],
-            "phone": row["phone"],
-            "category": row["category"],
-            "status": row["status"],
+            "name": row.get("name"),
+            "phone": row.get("phone"),
+            "category": row.get("category"),
+            "status": row.get("status"),
             "replied": has_user,
             "unknown": is_unknown and has_user,
             "last_message": last_msg,
-            "conversation": json.loads(row["conversation"] or "[]"),
+            "conversation": convo,
+            "deal_amount": row.get("deal_amount", 0),
         })
 
-    return {"total": total, "contacted": contacted, "interested": interested, "converted": converted, "leads": leads}
+    return {
+        "total": total,
+        "contacted": contacted,
+        "interested": interested,
+        "converted": converted,
+        "revenue": revenue,
+        "leads": leads
+    }
 
 
 @app.get("/ping")
