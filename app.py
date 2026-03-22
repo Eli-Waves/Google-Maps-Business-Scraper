@@ -40,12 +40,12 @@ def self_ping():
 
 
 def auto_scrape_and_outreach():
-    """Runs daily at 12pm automatically."""
+    """Runs scrape + outreach at 8am, 12pm, 4pm, 8pm automatically."""
     print("[⏰] Auto scheduler running...")
     while True:
         now = datetime.now()
-        if now.hour == 12 and now.minute == 0:
-            send_message(OWNER_PHONE, "Daily auto-scrape starting now...")
+        if now.hour in (8, 12, 16, 20) and now.minute == 0:
+            send_message(OWNER_PHONE, f"Auto scrape starting ({now.hour}:00)...")
             query = get_next_query()
             leads = scrape_businesses(query, limit=20)
             saved = 0
@@ -53,11 +53,46 @@ def auto_scrape_and_outreach():
                 if lead.get("phone"):
                     upsert_lead(lead)
                     saved += 1
-            send_message(OWNER_PHONE, f"Scraped {saved} businesses. Starting outreach in 30 mins...")
-            time.sleep(1800)
+            send_message(OWNER_PHONE, f"Scraped {saved} businesses. Messaging in 10 seconds...")
+            time.sleep(10)
             run_outreach()
             time.sleep(60)
         time.sleep(30)
+
+
+def follow_up_no_reply():
+    """Send a follow-up to businesses that haven't replied after 24 hours."""
+    print("[⏰] Follow-up checker running...")
+    while True:
+        try:
+            conn = sqlite3.connect("leads.db")
+            conn.row_factory = sqlite3.Row
+            # Get leads contacted over 24hrs ago with no user reply
+            rows = conn.execute("""
+                SELECT * FROM leads 
+                WHERE status = 'contacted' 
+                AND updated_at < datetime('now', '-3 hours')
+            """).fetchall()
+            conn.close()
+
+            for lead in rows:
+                import json as _json
+                convo = _json.loads(lead["conversation"] or "[]")
+                has_reply = any(m["role"] == "user" for m in convo)
+                if not has_reply and lead["phone"]:
+                    try:
+                        msg = "Hey, just checking in — did you get my last message?"
+                        send_message(lead["phone"], msg)
+                        append_message(lead["phone"], "assistant", msg)
+                        print(f"  [↻] Follow-up sent to {lead['name']} ({lead['phone']})")
+                    except Exception as e:
+                        print(f"  [!] Follow-up failed for {lead['phone']}: {e}")
+                    time.sleep(10)
+
+        except Exception as e:
+            print(f"[!] Follow-up error: {e}")
+
+        time.sleep(3600)  # Check every hour
 
 
 def get_stats() -> str:
@@ -168,6 +203,7 @@ def startup():
     init_db()
     threading.Thread(target=self_ping, daemon=True).start()
     threading.Thread(target=auto_scrape_and_outreach, daemon=True).start()
+    threading.Thread(target=follow_up_no_reply, daemon=True).start()
     print("[✓] App started")
 
 
@@ -369,6 +405,17 @@ ACTIONS (only if explicitly asked):
         enriched_lead["conversation_summary"] = convo_text
         update_lead_status(phone, "interested")
         notify_hot_lead(enriched_lead)
+        # Also notify owner via WhatsApp with full details
+        history = get_conversation(phone)
+        last_msgs = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:]])
+        send_message(OWNER_PHONE, 
+            f"Hot lead alert!\n\n"
+            f"Name: {lead['name']}\n"
+            f"Phone: {lead['phone']}\n"
+            f"Category: {lead.get('category') or 'N/A'}\n"
+            f"Address: {lead.get('address') or 'N/A'}\n\n"
+            f"Last messages:\n{last_msgs}"
+        )
         print(f"  🔥 HOT LEAD: {lead['name']} ({phone})")
     else:
         update_lead_status(phone, "contacted")
