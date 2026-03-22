@@ -12,14 +12,16 @@ from database import init_db, get_lead_by_phone, update_lead_status, append_mess
 from whatsapp import send_message, parse_incoming
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead, send_telegram
-from scraper import scrape_businesses, get_next_query, run as run_scraper
+from scraper import scrape_businesses, get_next_query
 from scheduler import run_outreach
+import sqlite3
 
 app = FastAPI(title="Web Agency Bot")
 
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN", "my_verify_token_123")
 SECRET_KEY = os.getenv("SECRET_KEY", "webgh_secret")
 SELF_URL = "https://google-maps-business-scraper.onrender.com/ping"
+OWNER_PHONE = "233530123985"
 
 
 def self_ping():
@@ -31,6 +33,26 @@ def self_ping():
         except Exception as e:
             print(f"[!] Self-ping failed: {e}")
         time.sleep(240)
+
+
+def get_stats() -> str:
+    conn = sqlite3.connect("leads.db")
+    conn.row_factory = sqlite3.Row
+    total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+    contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
+    interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
+    converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
+    new = conn.execute("SELECT COUNT(*) FROM leads WHERE status='new'").fetchone()[0]
+    conn.close()
+    return (
+        f"Here's your current stats:\n\n"
+        f"Total leads: {total}\n"
+        f"New (not yet messaged): {new}\n"
+        f"Contacted: {contacted}\n"
+        f"Interested (hot leads): {interested}\n"
+        f"Converted: {converted}\n\n"
+        f"Reply 'scrape' to find more businesses or 'outreach' to message new leads."
+    )
 
 
 @app.on_event("startup")
@@ -61,10 +83,42 @@ async def receive_message(request: Request):
         return {"status": "ignored"}
 
     phone = parsed["phone"]
-    user_message = parsed["message"]
+    user_message = parsed["message"].strip()
 
     print(f"[↓] Message from {phone}: {user_message}")
 
+    # Owner commands
+    if phone == OWNER_PHONE:
+        msg_lower = user_message.lower()
+
+        if "stat" in msg_lower or "progress" in msg_lower or "report" in msg_lower:
+            send_message(phone, get_stats())
+            return {"status": "ok"}
+
+        elif "scrape" in msg_lower:
+            send_message(phone, "Starting scrape now, will update you when done...")
+            def do_scrape():
+                query = get_next_query()
+                leads = scrape_businesses(query, limit=20)
+                saved = sum(1 for l in leads if l.get("phone"))
+                send_message(OWNER_PHONE, f"Scrape done! Found {saved} new businesses from: {query}")
+            threading.Thread(target=do_scrape, daemon=True).start()
+            return {"status": "ok"}
+
+        elif "outreach" in msg_lower:
+            send_message(phone, "Starting outreach now...")
+            threading.Thread(target=run_outreach, daemon=True).start()
+            return {"status": "ok"}
+
+        elif "help" in msg_lower:
+            send_message(phone, "Commands:\n- stats: see progress\n- scrape: find new businesses\n- outreach: message new leads\n- help: show this menu")
+            return {"status": "ok"}
+
+        else:
+            send_message(phone, "Hey! Reply with:\n- stats\n- scrape\n- outreach\n- help")
+            return {"status": "ok"}
+
+    # Regular lead handling
     append_message(phone, "user", user_message)
 
     lead = get_lead_by_phone(phone)
@@ -110,7 +164,7 @@ def trigger_scrape(key: str = Query(None)):
     print(f"[+] Scraping: {query}")
 
     try:
-        leads = scrape_businesses(query, limit=50)
+        leads = scrape_businesses(query, limit=20)
         saved = 0
         details = []
 
@@ -124,13 +178,13 @@ def trigger_scrape(key: str = Query(None)):
             chunk_size = 30
             for i in range(0, len(details), chunk_size):
                 chunk = details[i:i+chunk_size]
-                msg = f"✅ <b>Scrape Done!</b>\n<b>Query:</b> {query}\n<b>Saved:</b> {saved}\n\n" + "\n".join(chunk)
+                msg = f"Scrape Done!\nQuery: {query}\nSaved: {saved}\n\n" + "\n".join(chunk)
                 send_telegram(msg)
 
         return {"status": "done", "query": query, "saved": saved, "leads": details}
 
     except Exception as e:
-        send_telegram(f"❌ Scrape failed: {e}")
+        send_telegram(f"Scrape failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
