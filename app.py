@@ -286,7 +286,9 @@ ACTIONS (only use if explicitly requested):
                     if lead.get("phone"):
                         upsert_lead(lead)
                         saved += 1
-                send_message(OWNER_PHONE, f"Done! Saved {saved} businesses from: {query}")
+                send_message(OWNER_PHONE, f"Done! Saved {saved} businesses from: {query}. Messaging them in 10 seconds...")
+                time.sleep(10)
+                run_outreach()
             threading.Thread(target=do_scrape, daemon=True).start()
 
         if "[DO:OUTREACH]" in reply:
@@ -351,6 +353,12 @@ def trigger_scrape(key: str = Query(None)):
             details.append(f"• {lead.get('name','?')} | {lead.get('phone')} | {lead.get('category','N/A')}")
     if details:
         send_telegram(f"Scrape Done!\nQuery: {query}\nSaved: {saved}\n\n" + "\n".join(details[:30]))
+
+    def delayed_outreach():
+        time.sleep(10)
+        run_outreach()
+    threading.Thread(target=delayed_outreach, daemon=True).start()
+
     return {"status": "done", "query": query, "saved": saved}
 
 
