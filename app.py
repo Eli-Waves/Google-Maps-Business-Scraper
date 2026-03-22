@@ -503,6 +503,7 @@ def dashboard_data():
             "replied": has_user,
             "unknown": is_unknown and has_user,
             "last_message": last_msg,
+            "conversation": json.loads(row["conversation"] or "[]"),
         })
 
     return {"total": total, "contacted": contacted, "interested": interested, "converted": converted, "leads": leads}
