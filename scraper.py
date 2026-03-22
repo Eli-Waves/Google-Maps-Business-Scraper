@@ -90,11 +90,6 @@ def scrape_businesses(query: str, limit: int = 20) -> list[dict]:
             "maps_url": item.get("url", ""),
         }
 
-        # Skip businesses that already have a website
-        if website:
-            print(f"  [skip] {name} — has website")
-            continue
-
         leads.append(lead)
         print(f"  • {name} | {phone} | {category}")
 
