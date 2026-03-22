@@ -296,6 +296,13 @@ ACTIONS (only if explicitly asked):
 
         reply = response.choices[0].message.content.strip()
 
+        # Fallback keyword detection in case AI misses the tags
+        msg_lower = user_message.lower()
+        if "[DO:SCRAPE]" not in reply and any(w in msg_lower for w in ["scrape", "find businesses", "find leads", "search for"]):
+            reply += " [DO:SCRAPE]"
+        if "[DO:OUTREACH]" not in reply and any(w in msg_lower for w in ["outreach", "message leads", "send messages", "message them"]):
+            reply += " [DO:OUTREACH]"
+
         # Handle action tags
         if "[DO:SCRAPE]" in reply:
             reply = reply.replace("[DO:SCRAPE]", "").strip()
