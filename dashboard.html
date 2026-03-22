@@ -216,7 +216,7 @@ function render(){
     return l.status===filter;
   });
   document.getElementById('list').innerHTML = fl.map(l=>`
-    <div class="item${active?.phone===l.phone?' active':''}" onclick="open('${l.phone}')">
+    <div class="item${active?.phone===l.phone?' active':''}" onclick="openChat('${l.phone}')">
       <div class="av ${avCls(l)}">${ini(l.name)}</div>
       <div class="info">
         <div class="name">${l.name||'Unknown'}</div>
@@ -226,7 +226,7 @@ function render(){
     </div>`).join('')||'<div style="padding:20px;color:var(--muted);font-size:.8rem;text-align:center">No leads</div>';
 }
 
-function open(phone){
+function openChat(phone){
   active=leads.find(l=>l.phone===phone);
   if(!active) return;
   render();
