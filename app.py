@@ -70,7 +70,7 @@ def get_stats() -> str:
     new = conn.execute("SELECT COUNT(*) FROM leads WHERE status='new'").fetchone()[0]
 
     hot_leads = conn.execute(
-        "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 3"
+        "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 2"
     ).fetchall()
 
     hot_summary = ""
@@ -82,18 +82,12 @@ def get_stats() -> str:
 
     conn.close()
 
-    prompt = f"""You are a business assistant giving a WhatsApp briefing to the owner of Web GH, a web design agency in Ghana.
+    prompt = f"""You are a WhatsApp assistant for Web GH agency owner in Ghana. Give a very short 2-3 sentence update. Be casual like a friend texting.
 
-Data:
-- Total businesses: {total}
-- New (not messaged): {new}
-- Contacted: {contacted}
-- Interested (hot leads): {interested}
-- Converted to clients: {converted}
+Numbers: {total} total, {new} new, {contacted} contacted, {interested} interested, {converted} converted.
+Hot leads:{hot_summary if hot_summary else " none yet"}
 
-Recent hot lead conversations:{hot_summary if hot_summary else " None yet"}
-
-Give a short friendly WhatsApp-style briefing (max 5 sentences). Highlight hot leads, summarize conversations, suggest one next action. No bullet points."""
+Keep it short and casual. Max 3 sentences."""
 
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -203,29 +197,21 @@ async def receive_message(request: Request):
             model="llama-3.3-70b-versatile",
             messages=[{
                 "role": "system",
-                "content": """You are a command interpreter for a WhatsApp sales bot. 
-Classify the owner's message into exactly one of these intents and respond with ONLY the intent name and any extracted parameter, nothing else:
+                "content": """Classify this message into one intent. Reply with ONLY the intent, nothing else.
 
-STATS - owner wants a progress report or asks how things are going
-SCRAPE:[query] - owner wants to find new businesses. Extract the search query if mentioned, else use "auto"
-OUTREACH - owner wants to message new leads
-CONVERSATION:[name_or_phone] - owner wants to see or ask about a specific lead's conversation
-CONVERTED:[name_or_phone] - owner says a deal was closed or a client was won
-HELP - owner wants to know what commands are available
-UNKNOWN - none of the above
+STATS - asking about progress, updates, how things are going, numbers
+SCRAPE:[query] - wants to find businesses. Extract what to search or use "auto"
+OUTREACH - wants to send messages to leads
+CONVERSATION:[name] - asking about a specific person or business
+CONVERTED:[name] - saying someone paid, closed, signed up, became a client
+HELP - asking what the bot can do
 
-Examples:
-"how's it going?" -> STATS
-"find restaurants in Kumasi" -> SCRAPE:restaurants in Kumasi Ghana
-"message the new leads" -> OUTREACH
-"what did Treehouse say?" -> CONVERSATION:Treehouse
-"Treehouse just paid" -> CONVERTED:Treehouse
-"what can you do?" -> HELP"""
+If unsure, reply UNKNOWN."""
             }, {
                 "role": "user",
                 "content": user_message
             }],
-            max_tokens=50,
+            max_tokens=30,
             temperature=0,
         )
 
