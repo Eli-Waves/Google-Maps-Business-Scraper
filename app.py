@@ -215,53 +215,74 @@ async def receive_message(request: Request):
         interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
         converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
 
-        recent = conn.execute(
-            "SELECT name, phone, category FROM leads WHERE status='contacted' ORDER BY updated_at DESC LIMIT 10"
-        ).fetchall()
-        recent_list = "\n".join([f"- {r['name']} | {r['phone']} | {r['category']}" for r in recent])
+        # Leads who have REPLIED (conversation has user messages)
+        all_leads = conn.execute("SELECT * FROM leads ORDER BY updated_at DESC").fetchall()
+        
+        replied = []
+        hot_leads = []
+        unknown_people = []
+        no_reply = []
 
-        hot = conn.execute(
-            "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 5"
-        ).fetchall()
-        hot_detail = ""
-        for h in hot:
-            convo = json.loads(h["conversation"] or "[]")
-            msgs = " | ".join([f"{m['role']}: {m['content'][:80]}" for m in convo[-4:]])
-            hot_detail += f"\n- {h['name']} ({h['phone']}): {msgs}"
-
-        specific_lead = None
-        all_leads = conn.execute("SELECT name, phone, conversation, status FROM leads").fetchall()
         for lead in all_leads:
+            convo = json.loads(lead["conversation"] or "[]")
+            has_user_reply = any(m["role"] == "user" for m in convo)
+            is_scraped = lead["maps_url"] not in (None, "")
+            
+            last_msgs = " | ".join([f"{m['role']}: {m['content'][:60]}" for m in convo[-3:]])
+            entry = f"- {lead['name']} ({lead['phone']}) [{lead['status']}]: {last_msgs}"
+
+            if lead["status"] == "interested":
+                hot_leads.append(entry)
+            elif not is_scraped and has_user_reply:
+                unknown_people.append(entry)
+            elif has_user_reply:
+                replied.append(entry)
+            elif lead["status"] == "contacted":
+                no_reply.append(f"- {lead['name']} ({lead['phone']})")
+
+        conn.close()
+
+        # Check if asking about specific lead
+        specific_lead = None
+        conn2 = sqlite3.connect("leads.db")
+        conn2.row_factory = sqlite3.Row
+        for lead in conn2.execute("SELECT * FROM leads").fetchall():
             if lead["name"] and lead["name"].lower() in user_message.lower():
                 convo = json.loads(lead["conversation"] or "[]")
                 convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in convo])
-                specific_lead = f"Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}\nConversation:\n{convo_text}"
+                specific_lead = f"Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}\nFull conversation:\n{convo_text}"
                 break
-        conn.close()
+        conn2.close()
 
-        system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana.
+        system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana. You have FULL visibility into all conversations.
 
-CURRENT DATA:
-- Total: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
+NUMBERS: Total: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
 
-RECENTLY CONTACTED:
-{recent_list if recent_list else "None yet"}
+HOT LEADS (interested, with conversations):
+{chr(10).join(hot_leads) if hot_leads else "None yet"}
 
-HOT LEADS:
-{hot_detail if hot_detail else "None yet"}
+LEADS WHO REPLIED (but not yet interested):
+{chr(10).join(replied[:10]) if replied else "None yet"}
 
-{f"SPECIFIC LEAD:{chr(10)}{specific_lead}" if specific_lead else ""}
+UNKNOWN PEOPLE WHO TEXTED THE BOT (not from scrape):
+{chr(10).join(unknown_people) if unknown_people else "None"}
+
+CONTACTED BUT NO REPLY YET:
+{chr(10).join(no_reply[:10]) if no_reply else "None"} {"...and more" if len(no_reply) > 10 else ""}
+
+{f"SPECIFIC LEAD FULL CONVERSATION:{chr(10)}{specific_lead}" if specific_lead else ""}
 
 RULES:
 - Be casual and short (2-3 sentences max)
-- ONLY add action tags if the owner EXPLICITLY asks you to do that action
-- Do NOT suggest or start actions on your own
+- ONLY trigger actions if owner EXPLICITLY asks
+- If owner asks about a specific business, use their conversation data
+- If someone outside the scrape texted, mention it — could be a potential client
 - No bullet points
 
-ACTIONS (only use if explicitly requested):
-[DO:SCRAPE] - only if owner says "scrape", "find businesses", "search for leads"
-[DO:OUTREACH] - only if owner says "send messages", "do outreach", "message leads"
-[DO:CONVERTED:phone] - only if owner says someone paid or signed up"""
+ACTIONS (only if explicitly asked):
+[DO:SCRAPE] - find new businesses
+[DO:OUTREACH] - message new leads  
+[DO:CONVERTED:phone] - mark as converted"""
 
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
