@@ -222,12 +222,19 @@ async def receive_message(request: Request):
         hot_leads = []
         unknown_people = []
         no_reply = []
+        outreach_message_sample = None
 
         for lead in all_leads:
             convo = json.loads(lead["conversation"] or "[]")
             has_user_reply = any(m["role"] == "user" for m in convo)
             is_scraped = lead["maps_url"] not in (None, "")
             
+            # Get the first outreach message sent
+            if not outreach_message_sample and convo:
+                first = convo[0]
+                if first["role"] == "assistant":
+                    outreach_message_sample = first["content"]
+
             last_msgs = " | ".join([f"{m['role']}: {m['content'][:60]}" for m in convo[-3:]])
             entry = f"- {lead['name']} ({lead['phone']}) [{lead['status']}]: {last_msgs}"
 
@@ -257,6 +264,9 @@ async def receive_message(request: Request):
         system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana. You have FULL visibility into all conversations.
 
 NUMBERS: Total: {total} | New: {new} | Contacted: {contacted} | Interested: {interested} | Converted: {converted}
+
+OUTREACH MESSAGE SENT TO ALL BUSINESSES:
+"{outreach_message_sample if outreach_message_sample else 'Not sent yet'}"
 
 HOT LEADS (interested, with conversations):
 {chr(10).join(hot_leads) if hot_leads else "None yet"}
