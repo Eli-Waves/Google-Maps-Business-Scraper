@@ -134,10 +134,11 @@
 
   /* ── Mobile ── */
   @media (max-width: 680px) {
-    .sidebar { width: 100%; position: absolute; inset: 0; z-index: 10; }
+    body { position: relative; }
+    .sidebar { width: 100%; position: fixed; inset: 0; z-index: 10; transform: translateX(0); }
     .sidebar.hidden { transform: translateX(-100%); }
-    .chat { position: absolute; inset: 0; z-index: 10; }
-    .chat.hidden { display: none; }
+    .chat { position: fixed; inset: 0; z-index: 10; }
+    .chat.hidden { transform: translateX(100%); }
     .back-btn { display: block; }
   }
 
@@ -216,7 +217,7 @@ function render(){
     return l.status===filter;
   });
   document.getElementById('list').innerHTML = fl.map(l=>`
-    <div class="item${active?.phone===l.phone?' active':''}" onclick="openChat('${l.phone}')">
+    <div class="item${active?.phone===l.phone?' active':''}" data-phone="${l.phone}" onclick="event.preventDefault();event.stopPropagation();openChat(this.dataset.phone)">
       <div class="av ${avCls(l)}">${ini(l.name)}</div>
       <div class="info">
         <div class="name">${l.name||'Unknown'}</div>
