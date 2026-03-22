@@ -107,141 +107,124 @@ def follow_up_hot_leads():
 
 
 def follow_up_no_reply():
-    """Send a follow-up to businesses that haven't replied after 24 hours."""
+    """Send a follow-up to businesses that haven't replied after 3 hours."""
     print("[⏰] Follow-up checker running...")
     while True:
         try:
-            conn = sqlite3.connect("leads.db")
-            conn.row_factory = sqlite3.Row
-            # Get leads contacted over 24hrs ago with no user reply
-            rows = conn.execute("""
-                SELECT * FROM leads 
-                WHERE status = 'contacted' 
-                AND updated_at < datetime('now', '-3 hours')
-            """).fetchall()
-            conn.close()
+            from database import get_conn as _gc, row_to_dict as _rtd
+            _conn, _db = _gc()
+            _cur = _conn.cursor()
+            if _db == "pg":
+                _cur.execute("SELECT * FROM leads WHERE status='contacted' AND updated_at < NOW() - INTERVAL '3 hours'")
+            else:
+                _cur.execute("SELECT * FROM leads WHERE status='contacted' AND updated_at < datetime('now', '-3 hours')")
+            rows = [_rtd(r, _db, _cur) for r in _cur.fetchall()]
+            _cur.close()
+            _conn.close()
 
             for lead in rows:
-                import json as _json
-                convo = _json.loads(lead["conversation"] or "[]")
+                convo = json.loads(lead.get("conversation") or "[]")
                 has_reply = any(m["role"] == "user" for m in convo)
-                if not has_reply and lead["phone"]:
+                if not has_reply and lead.get("phone"):
                     try:
                         msg = "Hey, just checking in — did you get my last message?"
                         send_message(lead["phone"], msg)
                         append_message(lead["phone"], "assistant", msg)
                         print(f"  [↻] Follow-up sent to {lead['name']} ({lead['phone']})")
                     except Exception as e:
-                        print(f"  [!] Follow-up failed for {lead['phone']}: {e}")
+                        print(f"  [!] Follow-up failed: {e}")
                     time.sleep(10)
-
         except Exception as e:
             print(f"[!] Follow-up error: {e}")
-
-        time.sleep(3600)  # Check every hour
+        time.sleep(3600)
 
 
 def get_stats() -> str:
-    conn = sqlite3.connect("leads.db")
-    conn.row_factory = sqlite3.Row
-    total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
-    contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
-    interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
-    converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
-    new = conn.execute("SELECT COUNT(*) FROM leads WHERE status='new'").fetchone()[0]
-
-    hot_leads = conn.execute(
-        "SELECT name, phone, conversation FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 2"
-    ).fetchall()
+    from database import get_conn as _gc, row_to_dict as _rtd
+    _conn, _db = _gc()
+    _cur = _conn.cursor()
+    def _c(q): _cur.execute(q); return _cur.fetchone()[0]
+    total = _c("SELECT COUNT(*) FROM leads")
+    contacted = _c("SELECT COUNT(*) FROM leads WHERE status='contacted'")
+    interested = _c("SELECT COUNT(*) FROM leads WHERE status='interested'")
+    converted = _c("SELECT COUNT(*) FROM leads WHERE status='converted'")
+    new = _c("SELECT COUNT(*) FROM leads WHERE status='new'")
+    _cur.execute("SELECT * FROM leads WHERE status='interested' ORDER BY updated_at DESC LIMIT 2")
+    hot_rows = [_rtd(r, _db, _cur) for r in _cur.fetchall()]
+    _cur.close(); _conn.close()
 
     hot_summary = ""
-    for lead in hot_leads:
-        convo = json.loads(lead["conversation"] or "[]")
-        last_msgs = convo[-3:] if convo else []
-        msgs = " | ".join([f"{m['role']}: {m['content'][:60]}" for m in last_msgs])
-        hot_summary += f"\n- {lead['name']} ({lead['phone']}): {msgs}"
+    for lead in hot_rows:
+        convo = json.loads(lead.get("conversation") or "[]")
+        msgs = " | ".join([f"{m['role']}: {m['content'][:60]}" for m in convo[-3:]])
+        hot_summary += f"\n- {lead.get('name')} ({lead.get('phone')}): {msgs}"
 
-    conn.close()
-
-    prompt = f"""You are a WhatsApp assistant for Web GH agency owner in Ghana. Give a very short 2-3 sentence update then suggest ONE specific next action based on the numbers. Be casual like a friend texting.
+    prompt = f"""You are a WhatsApp assistant for Web GH agency owner in Ghana. Give a very short 2-3 sentence update then suggest ONE specific next action. Be casual like a friend texting.
 
 Numbers: {total} total, {new} new, {contacted} contacted, {interested} interested, {converted} converted.
 Hot leads:{hot_summary if hot_summary else " none yet"}
 
-Logic for suggestion:
 - If new > 0: suggest running outreach
-- If new == 0 and total < 10: suggest scraping more businesses
-- If interested > 0: suggest following up with the hot leads
-- If contacted > 20 and interested == 0: suggest scraping a different category
+- If new == 0: suggest scraping more businesses
+- If interested > 0: suggest following up with hot leads
 
-Keep it short and casual. Max 3 sentences total including the suggestion."""
+Max 3 sentences."""
 
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=200,
-        temperature=0.7,
+        max_tokens=200, temperature=0.7,
     )
     return response.choices[0].message.content.strip()
 
 
 def get_conversation_summary(search_term: str) -> str:
-    """Get AI summary of a specific lead's conversation."""
-    conn = sqlite3.connect("leads.db")
-    conn.row_factory = sqlite3.Row
+    from database import get_all_leads
+    leads = get_all_leads()
+    lead = next((l for l in leads if
+        search_term.lower() in (l.get("name") or "").lower() or
+        search_term in (l.get("phone") or "")), None)
 
-    # Search by name or phone
-    row = conn.execute(
-        "SELECT * FROM leads WHERE phone LIKE ? OR LOWER(name) LIKE ?",
-        (f"%{search_term}%", f"%{search_term.lower()}%")
-    ).fetchone()
-    conn.close()
-
-    if not row:
+    if not lead:
         return f"No lead found matching '{search_term}'."
 
-    lead = dict(row)
     convo = json.loads(lead.get("conversation") or "[]")
-
     if not convo:
-        return f"{lead['name']} hasn't replied yet."
+        return f"{lead.get('name')} hasn't replied yet."
 
     convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in convo])
-
-    prompt = f"""Summarize this WhatsApp sales conversation for the business owner of Web GH.
-Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}
-
-Conversation:
-{convo_text}
-
-Give a 3-4 sentence summary: what they said, their interest level, any objections, and what to do next. Be direct and conversational."""
+    prompt = f"""Summarize this WhatsApp sales conversation for the Web GH owner.
+Lead: {lead.get('name')} | {lead.get('phone')} | Status: {lead.get('status')}
+Conversation:\n{convo_text}
+3-4 sentences: what they said, interest level, objections, what to do next."""
 
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=200,
-        temperature=0.7,
+        max_tokens=200, temperature=0.7,
     )
-    return f"{lead['name']} ({lead['phone']}):\n\n" + response.choices[0].message.content.strip()
+    return f"{lead.get('name')} ({lead.get('phone')}):\n\n" + response.choices[0].message.content.strip()
 
 
 def mark_converted(search_term: str) -> str:
-    """Mark a lead as converted."""
-    conn = sqlite3.connect("leads.db")
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT * FROM leads WHERE phone LIKE ? OR LOWER(name) LIKE ?",
-        (f"%{search_term}%", f"%{search_term.lower()}%")
-    ).fetchone()
+    from database import get_all_leads, get_conn as _gc
+    leads = get_all_leads()
+    lead = next((l for l in leads if
+        search_term.lower() in (l.get("name") or "").lower() or
+        search_term in (l.get("phone") or "")), None)
 
-    if not row:
-        conn.close()
+    if not lead:
         return f"No lead found matching '{search_term}'."
 
-    conn.execute("UPDATE leads SET status='converted' WHERE phone=?", (row["phone"],))
-    conn.commit()
-    conn.close()
-    return f"Marked {row['name']} as converted! Well done on closing the deal."
+    _conn, _db = _gc()
+    _cur = _conn.cursor()
+    if _db == "pg":
+        _cur.execute("UPDATE leads SET status='converted', updated_at=NOW() WHERE phone=%s", (lead["phone"],))
+    else:
+        _cur.execute("UPDATE leads SET status='converted' WHERE phone=?", (lead["phone"],))
+    _conn.commit()
+    _cur.close(); _conn.close()
+    return f"Marked {lead.get('name')} as converted! Well done on closing the deal."
 
 
 @app.on_event("startup")
@@ -290,28 +273,33 @@ async def receive_message(request: Request):
             return {"status": "duplicate"}
         app._last_owner_msg[dedup_key] = time.time()
 
-        # Pull all relevant data
-        conn = sqlite3.connect("leads.db")
-        conn.row_factory = sqlite3.Row
-        total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
-        new = conn.execute("SELECT COUNT(*) FROM leads WHERE status='new'").fetchone()[0]
-        contacted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='contacted'").fetchone()[0]
-        interested = conn.execute("SELECT COUNT(*) FROM leads WHERE status='interested'").fetchone()[0]
-        converted = conn.execute("SELECT COUNT(*) FROM leads WHERE status='converted'").fetchone()[0]
+        # Pull all relevant data using new DB layer
+        from database import get_all_leads, get_conn as _get_conn, row_to_dict as _row_to_dict
+        _conn, _db = _get_conn()
+        _cur = _conn.cursor()
+        def _count(q):
+            _cur.execute(q)
+            return _cur.fetchone()[0]
+        total = _count("SELECT COUNT(*) FROM leads")
+        new = _count("SELECT COUNT(*) FROM leads WHERE status='new'")
+        contacted = _count("SELECT COUNT(*) FROM leads WHERE status='contacted'")
+        interested = _count("SELECT COUNT(*) FROM leads WHERE status='interested'")
+        converted = _count("SELECT COUNT(*) FROM leads WHERE status='converted'")
+        _cur.close()
+        _conn.close()
 
-        # Leads who have REPLIED (conversation has user messages)
-        all_leads = conn.execute("SELECT * FROM leads ORDER BY updated_at DESC").fetchall()
-        
+        all_leads_data = get_all_leads()
+
         replied = []
         hot_leads = []
         unknown_people = []
         no_reply = []
         outreach_message_sample = None
 
-        for lead in all_leads:
-            convo = json.loads(lead["conversation"] or "[]")
+        for lead in all_leads_data:
+            convo = json.loads(lead.get("conversation") or "[]")
             has_user_reply = any(m["role"] == "user" for m in convo)
-            is_scraped = lead["maps_url"] not in (None, "")
+            is_scraped = lead.get("maps_url") not in (None, "")
             
             # Get the first outreach message sent
             if not outreach_message_sample and convo:
@@ -320,30 +308,25 @@ async def receive_message(request: Request):
                     outreach_message_sample = first["content"]
 
             last_msgs = " | ".join([f"{m['role']}: {m['content'][:60]}" for m in convo[-3:]])
-            entry = f"- {lead['name']} ({lead['phone']}) [{lead['status']}]: {last_msgs}"
+            entry = f"- {lead.get('name')} ({lead.get('phone')}) [{lead.get('status')}]: {last_msgs}"
 
-            if lead["status"] == "interested":
+            if lead.get("status") == "interested":
                 hot_leads.append(entry)
             elif not is_scraped and has_user_reply:
                 unknown_people.append(entry)
             elif has_user_reply:
                 replied.append(entry)
-            elif lead["status"] == "contacted":
-                no_reply.append(f"- {lead['name']} ({lead['phone']})")
-
-        conn.close()
+            elif lead.get("status") == "contacted":
+                no_reply.append(f"- {lead.get('name')} ({lead.get('phone')})")
 
         # Check if asking about specific lead
         specific_lead = None
-        conn2 = sqlite3.connect("leads.db")
-        conn2.row_factory = sqlite3.Row
-        for lead in conn2.execute("SELECT * FROM leads").fetchall():
-            if lead["name"] and lead["name"].lower() in user_message.lower():
-                convo = json.loads(lead["conversation"] or "[]")
+        for lead in all_leads_data:
+            if lead.get("name") and lead["name"].lower() in user_message.lower():
+                convo = json.loads(lead.get("conversation") or "[]")
                 convo_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in convo])
                 specific_lead = f"Lead: {lead['name']} | {lead['phone']} | Status: {lead['status']}\nFull conversation:\n{convo_text}"
                 break
-        conn2.close()
 
         system_prompt = f"""You are an AI business assistant for the owner of Web GH, a web design agency in Ghana. You have FULL visibility into all conversations.
 
@@ -422,10 +405,14 @@ ACTIONS (only if explicitly asked):
             match = re.search(r'\[DO:CONVERTED:([^\]]+)\]', reply)
             if match:
                 target_phone = match.group(1)
-                conn2 = sqlite3.connect("leads.db")
-                conn2.execute("UPDATE leads SET status='converted' WHERE phone=?", (target_phone,))
-                conn2.commit()
-                conn2.close()
+                from database import get_conn as _gc2
+                _c2, _d2 = _gc2()
+                _cu2 = _c2.cursor()
+                if _d2 == "pg":
+                    _cu2.execute("UPDATE leads SET status='converted', updated_at=NOW() WHERE phone=%s", (target_phone,))
+                else:
+                    _cu2.execute("UPDATE leads SET status='converted' WHERE phone=?", (target_phone,))
+                _c2.commit(); _cu2.close(); _c2.close()
                 reply = re.sub(r'\[DO:CONVERTED:[^\]]+\]', '', reply).strip()
 
         send_message(phone, reply)
