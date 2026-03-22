@@ -41,7 +41,7 @@
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
 
   .stats {
-    display: grid; grid-template-columns: repeat(4,1fr);
+    display: grid; grid-template-columns: repeat(5,1fr);
     border-bottom: 1px solid var(--border);
   }
   .stat { padding: 8px 4px; text-align: center; cursor: pointer; }
@@ -160,6 +160,7 @@
     <div class="stat" onclick="setFilter('contacted')"><div class="n" id="sc">0</div><div class="l">Sent</div></div>
     <div class="stat hot" onclick="setFilter('interested')"><div class="n" id="si">0</div><div class="l">Hot</div></div>
     <div class="stat ok" onclick="setFilter('converted')"><div class="n" id="sv">0</div><div class="l">Clients</div></div>
+    <div class="stat ok"><div class="n" id="sr" style="font-size:.9rem">₵0</div><div class="l">Revenue</div></div>
   </div>
 
   <div class="search"><input id="q" placeholder="Search…" oninput="render()"></div>
@@ -262,6 +263,7 @@ async function fetch_data(){
     document.getElementById('sc').textContent=d.contacted;
     document.getElementById('si').textContent=d.interested;
     document.getElementById('sv').textContent=d.converted;
+    document.getElementById('sr').textContent='₵'+(d.revenue||0).toLocaleString();
     document.getElementById('upd').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true});
     leads=d.leads;
     render();
