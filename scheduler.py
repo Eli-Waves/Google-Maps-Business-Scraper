@@ -62,6 +62,13 @@ def scrape_until_target(target: int = TARGET_LEADS) -> int:
                 break
         except Exception as e:
             print(f"[!] Scrape error: {e}")
+            if "402" in str(e) or "Payment" in str(e):
+                print("[!] Apify credits exhausted — stopping scrape")
+                for admin in ADMIN_PHONES:
+                    try:
+                        send_message(admin, "Apify credits ran out. Top up at console.apify.com to continue scraping.", typing_delay=False)
+                    except: pass
+                break
         attempts += 1
         time.sleep(3)  # small delay between queries
 
