@@ -284,6 +284,8 @@ async def receive_message(request: Request):
         _conn.close()
 
         all_leads_data = get_all_leads()
+        # Cap at 200 most recent leads to avoid OOM on large databases
+        all_leads_data = all_leads_data[:200]
 
         replied = []
         hot_leads = []
@@ -292,7 +294,7 @@ async def receive_message(request: Request):
         outreach_message_sample = None
 
         for lead in all_leads_data:
-            convo = json.loads(lead.get("conversation") or "[]")
+            convo = json.loads(lead.get("conversation") or "[]")[-20:]  # only last 20 messages per lead
             has_user_reply = any(m["role"] == "user" for m in convo)
             is_scraped = lead.get("maps_url") not in (None, "")
             
@@ -377,7 +379,7 @@ ACTIONS (only if explicitly asked):
             reply += " [DO:OUTREACH]"
 
         # Handle action tags
-        elif "scrape" in msg_lower or "[DO:SCRAPE]" in reply:
+        if "[DO:SCRAPE]" in reply:
             send_message(phone, "On it, finding businesses without websites. Will keep searching until I get 40...")
             def do_scrape():
                 from scheduler import scrape_until_target
