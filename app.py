@@ -92,6 +92,7 @@ def follow_up_hot_leads():
                         msg = "Hey, just checking in — are you still interested in getting a website for your business? We'd love to help."
                         send_message(lead["phone"], msg)
                         append_message(lead["phone"], "assistant", msg)
+                        update_lead_status(lead["phone"], "hot_followed_up")
                         print(f"  [↻] Hot lead follow-up sent to {lead['name']}")
                     except Exception as e:
                         print(f"  [!] Follow-up failed: {e}")
@@ -125,6 +126,7 @@ def follow_up_no_reply():
                         msg = "Hey, just checking in — did you get my last message?"
                         send_message(lead["phone"], msg)
                         append_message(lead["phone"], "assistant", msg)
+                        update_lead_status(lead["phone"], "followed_up")
                         print(f"  [↻] Follow-up sent to {lead['name']} ({lead['phone']})")
                     except Exception as e:
                         print(f"  [!] Follow-up failed: {e}")
