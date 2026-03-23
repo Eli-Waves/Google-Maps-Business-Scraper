@@ -104,5 +104,11 @@ def is_whatsapp_number(phone: str) -> bool:
 
 
 
+def first_outreach_message(business_name: str) -> str:
+    """Generate the first outreach message for a business lead."""
     clean_name = business_name.split(",")[0].strip()
-    return f"Hi, is this {clean_name}?"
+    return (
+        f"Hi {clean_name}! 👋 I noticed your business doesn't have a website yet. "
+        f"We're Web GH — we build clean, affordable websites for businesses in Ghana. "
+        f"Would you be interested in getting one? Happy to share more details!"
+    )
