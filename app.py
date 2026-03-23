@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
 from groq import Groq
 from database import init_db, get_lead_by_phone, update_lead_status, append_message, upsert_lead, get_conversation
-from whatsapp import send_message, parse_incoming
+from whatsapp import send_message, parse_incoming, first_outreach_message
 from ai_chat import get_ai_reply
 from telegram_notify import notify_hot_lead, send_telegram
 from scraper import scrape_businesses, get_next_query
@@ -354,7 +354,8 @@ RULES:
 ACTIONS (only if explicitly asked):
 [DO:SCRAPE] - find new businesses
 [DO:OUTREACH] - message new leads  
-[DO:CONVERTED:phone] - mark as converted"""
+[DO:CONVERTED:phone] - mark as converted
+[DO:CHAT:phone] - start chatting with a specific phone number"""
 
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -404,6 +405,21 @@ ACTIONS (only if explicitly asked):
                     _cu2.execute("UPDATE leads SET status='converted' WHERE phone=?", (target_phone,))
                 _c2.commit(); _cu2.close(); _c2.close()
                 reply = re.sub(r'\[DO:CONVERTED:[^\]]+\]', '', reply).strip()
+
+        if "[DO:CHAT:" in reply:
+            import re
+            match = re.search(r'\[DO:CHAT:([^\]]+)\]', reply)
+            if match:
+                target_phone = match.group(1).replace(" ", "").replace("+", "")
+                # Add as lead if not exists
+                if not get_lead_by_phone(target_phone):
+                    upsert_lead({"name": "Manual Contact", "phone": target_phone, "website": None, "category": None, "address": None, "maps_url": None})
+                msg = first_outreach_message("there")
+                send_message(target_phone, msg)
+                append_message(target_phone, "assistant", msg)
+                update_lead_status(target_phone, "contacted")
+                reply = re.sub(r'\[DO:CHAT:[^\]]+\]', '', reply).strip()
+                reply += f" Started chatting with {target_phone}."
 
         send_message(phone, reply)
         return {"status": "ok"}
