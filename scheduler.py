@@ -80,8 +80,14 @@ def run_outreach():
         name = lead["name"] or "there"
         try:
             from database import get_lead_by_phone
+            from whatsapp import is_whatsapp_number
             current = get_lead_by_phone(phone)
             if current and current["status"] != "new":
+                continue
+            # Verify it's a WhatsApp number
+            if not is_whatsapp_number(phone):
+                print(f"  [!] {phone} not on WhatsApp, skipping")
+                update_lead_status(phone, "contacted")  # mark so we don't retry
                 continue
             message = first_outreach_message(name)
             send_message(phone, message, typing_delay=False)
