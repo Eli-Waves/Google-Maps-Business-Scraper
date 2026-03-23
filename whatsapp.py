@@ -81,6 +81,28 @@ def parse_incoming(data: dict) -> dict | None:
         return None
 
 
-def first_outreach_message(business_name: str) -> str:
+def is_whatsapp_number(phone: str) -> bool:
+    """Check if a phone number is registered on WhatsApp."""
+    headers = {
+        "Authorization": f"Bearer {WA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = httpx.post(
+            f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/contacts",
+            json={"blocking": "wait", "contacts": [f"+{phone}"], "force_check": True},
+            headers=headers,
+            timeout=10
+        )
+        data = response.json()
+        contacts = data.get("contacts", [])
+        if contacts and contacts[0].get("status") == "valid":
+            return True
+        return False
+    except:
+        return True  # If check fails, assume valid and try anyway
+
+
+
     clean_name = business_name.split(",")[0].strip()
     return f"Hi, is this {clean_name}?"
