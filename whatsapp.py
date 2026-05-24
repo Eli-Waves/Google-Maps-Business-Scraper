@@ -10,47 +10,33 @@ PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 BASE_URL = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
 
 
-def send_typing(to: str):
-    """Show typing indicator to the recipient."""
-    headers = {
-        "Authorization": f"Bearer {WA_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "reaction",
-        "reaction": {"message_id": "", "emoji": ""}
-    }
-    # Use status update to show typing
-    try:
-        httpx.post(
-            f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages",
-            json={
-                "messaging_product": "whatsapp",
-                "status": "read",
-                "message_id": "placeholder"
-            },
-            headers=headers,
-            timeout=5
-        )
-    except:
-        pass
+def normalize_phone(phone: str) -> str:
+    """Normalize phone number to WhatsApp format: 233XXXXXXXXX (no +, no spaces)"""
+    if not phone:
+        return phone
+    # Strip everything except digits
+    digits = ''.join(filter(str.isdigit, phone))
+    # If starts with 0, replace with Ghana code
+    if digits.startswith('0'):
+        digits = '233' + digits[1:]
+    # If starts with 233 already, good
+    # If it's a 9-digit number with no country code, prepend 233
+    if len(digits) == 9:
+        digits = '233' + digits
+    return digits
 
 
 def send_message(to: str, text: str, typing_delay: bool = True) -> dict:
     """Send a WhatsApp text message with natural typing delay."""
+    to = normalize_phone(to)
     headers = {
         "Authorization": f"Bearer {WA_TOKEN}",
         "Content-Type": "application/json",
     }
-
     if typing_delay:
-        # Delay based on word count — ~0.05 seconds per word, min 1s max 5s
         word_count = len(text.split())
         delay = min(max(word_count * 0.05, 1), 5)
         time.sleep(delay)
-
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -69,10 +55,8 @@ def parse_incoming(data: dict) -> dict | None:
         changes = entry["changes"][0]
         value = changes["value"]
         msg = value["messages"][0]
-
         if msg.get("type") != "text":
             return None
-
         phone = msg["from"]
         text = msg["text"]["body"]
         message_id = msg.get("id", "")
@@ -83,6 +67,7 @@ def parse_incoming(data: dict) -> dict | None:
 
 def is_whatsapp_number(phone: str) -> bool:
     """Check if a phone number is registered on WhatsApp."""
+    phone = normalize_phone(phone)
     headers = {
         "Authorization": f"Bearer {WA_TOKEN}",
         "Content-Type": "application/json",
@@ -100,8 +85,7 @@ def is_whatsapp_number(phone: str) -> bool:
             return True
         return False
     except:
-        return True  # If check fails, assume valid and try anyway
-
+        return True
 
 
 def first_outreach_message(business_name: str) -> str:
