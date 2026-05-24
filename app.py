@@ -205,7 +205,7 @@ async def receive_message(request: Request):
         if time.time() - last < 10:
             return {"status": "duplicate"}
         app._last_owner_msg[dedup_key] = time.time()
-msg = user_message.strip()
+        msg = user_message.strip()
         msg_lower = msg.lower()
 
         # ── HARDCODED COMMANDS (no AI needed) ────────────────────────────────
