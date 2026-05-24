@@ -207,6 +207,7 @@ async def receive_message(request: Request):
         app._last_owner_msg[dedup_key] = time.time()
         msg = user_message.strip()
         msg_lower = msg.lower()
+        print(f"[DEBUG] msg='{msg}' | startswith_text={msg_lower.startswith('text ')}")
 
         # ── HARDCODED COMMANDS (no AI needed) ────────────────────────────────
 
