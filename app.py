@@ -205,17 +205,23 @@ async def receive_message(request: Request):
         if time.time() - last < 10:
             return {"status": "duplicate"}
         app._last_owner_msg[dedup_key] = time.time()
-
-        msg = user_message.strip()
+msg = user_message.strip()
         msg_lower = msg.lower()
 
         # ── HARDCODED COMMANDS (no AI needed) ────────────────────────────────
 
         # TEXT [number] [optional custom message]
-        text_match = re.search(r'^text[:\s]+(\+?[\d\s\-]+)(?:\s+(.+))?$', msg, re.IGNORECASE)
-        if text_match:
-            target_raw = text_match.group(1)
-            custom_msg = text_match.group(2)
+        if msg_lower.startswith("text "):
+            parts = msg[5:].strip().split()
+            phone_tokens = []
+            msg_tokens = []
+            for t in parts:
+                if any(c.isdigit() for c in t) and not msg_tokens:
+                    phone_tokens.append(t)
+                else:
+                    msg_tokens.append(t)
+            target_raw = "".join(phone_tokens)
+            custom_msg = " ".join(msg_tokens).strip()
             target_phone = normalize_phone(target_raw)
             if not target_phone or len(target_phone) < 9:
                 send_message(phone, f"Couldn't parse that number: {target_raw}")
@@ -223,7 +229,7 @@ async def receive_message(request: Request):
             if not get_lead_by_phone(target_phone):
                 upsert_lead({"name": "Manual Contact", "phone": target_phone,
                              "website": None, "category": None, "address": None, "maps_url": None})
-            out_msg = custom_msg.strip() if custom_msg else first_outreach_message("there")
+            out_msg = custom_msg if custom_msg else first_outreach_message("there")
             try:
                 send_message(target_phone, out_msg)
                 append_message(target_phone, "assistant", out_msg)
@@ -232,7 +238,7 @@ async def receive_message(request: Request):
             except Exception as e:
                 send_message(phone, f"❌ Failed to send to {target_phone}: {e}")
             return {"status": "ok"}
-
+     
         # LIST LEADS / LIST HOT / LIST ALL / LIST REPLIED
         if re.search(r'\blist\b', msg_lower):
             from database import get_all_leads
