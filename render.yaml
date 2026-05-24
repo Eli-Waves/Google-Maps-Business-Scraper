@@ -1,21 +1,25 @@
-services:
-  - type: web
-    name: web-agency-bot
+- type: cron
+    name: daily-outreach
     runtime: python
-    buildCommand: pip install -r requirements.txt && playwright install chromium
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    schedule: "0 8 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -c "from scheduler import run_outreach; run_outreach()"
     envVars:
       - key: WHATSAPP_TOKEN
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
-      - key: OPENAI_API_KEY
+      - key: DATABASE_URL
         sync: false
-      - key: TELEGRAM_BOT_TOKEN
+
+  - type: cron
+    name: daily-scrape
+    runtime: python
+    schedule: "0 7 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -c "from scheduler import scrape_until_target; scrape_until_target(20)"
+    envVars:
+      - key: APIFY_API_KEY
         sync: false
-      - key: TELEGRAM_CHAT_ID
+      - key: DATABASE_URL
         sync: false
-      - key: WEBHOOK_VERIFY_TOKEN
-        sync: false
-      - key: AGENCY_NAME
-        value: WebGh Agency
