@@ -231,15 +231,17 @@ async def receive_message(request: Request):
                 upsert_lead({"name": "Manual Contact", "phone": target_phone,
                              "website": None, "category": None, "address": None, "maps_url": None})
             out_msg = custom_msg if custom_msg else first_outreach_message("there")
+            print(f"[DEBUG] target_phone='{target_phone}' | out_msg='{out_msg}'")
             try:
                 send_message(target_phone, out_msg)
                 append_message(target_phone, "assistant", out_msg)
                 update_lead_status(target_phone, "contacted")
                 send_message(phone, f"✅ Sent to {target_phone}:\n\"{out_msg}\"")
             except Exception as e:
+                print(f"[DEBUG] Send failed: {e}")
                 send_message(phone, f"❌ Failed to send to {target_phone}: {e}")
             return {"status": "ok"}
-     
+
         # LIST LEADS / LIST HOT / LIST ALL / LIST REPLIED
         if re.search(r'\blist\b', msg_lower):
             from database import get_all_leads
